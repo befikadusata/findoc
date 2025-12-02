@@ -55,37 +55,37 @@ This document outlines the step-by-step implementation plan to build the FinDocA
 
 ## Phase 3: AI/ML Model Integration
 
--   [ ] **3.1: Document Classification**
-    -   [ ] Create `app/classification/model.py`.
-    -   [ ] Install `torch` and `transformers`.
-    -   [ ] Implement `classify_document` using a HuggingFace `pipeline` with a fine-tuned `distilbert-base-uncased` model.
-    -   [ ] Create a script `scripts/download_models.py` to download the classifier model from a hub.
-    -   [ ] Integrate into the Celery task and update the document status with the `doc_type`.
+-   [x] **3.1: Document Classification**
+    -   [x] Create `app/classification/model.py`.
+    -   [x] Install `torch` and `transformers`.
+    -   [x] Implement `classify_document` using a HuggingFace `pipeline` with a fine-tuned `distilbert-base-uncased` model.
+    -   [x] Create a script `scripts/download_models.py` to download the classifier model from a hub.
+    -   [x] Integrate into the Celery task and update the document status with the `doc_type`.
 
--   [ ] **3.2: RAG - Chunking and Embedding**
-    -   [ ] Create `app/rag/pipeline.py`.
-    -   [ ] Install `sentence-transformers` and `chromadb`.
-    -   [ ] Implement the `index_document` function.
-    -   [ ] Inside the function, use `RecursiveCharacterTextSplitter` to chunk the extracted text.
-    -   [ ] Use `SentenceTransformer` to create embeddings for the chunks.
-    -   [ ] Initialize a persistent ChromaDB client and add the chunks, embeddings, and metadata to a collection.
-    -   [ ] Integrate `index_document` into the Celery task.
+-   [x] **3.2: RAG - Chunking and Embedding**
+    -   [x] Create `app/rag/pipeline.py`.
+    -   [x] Install `sentence-transformers` and `chromadb`.
+    -   [x] Implement the `index_document` function.
+    -   [x] Inside the function, use `RecursiveCharacterTextSplitter` to chunk the extracted text.
+    -   [x] Use `SentenceTransformer` to create embeddings for the chunks.
+    -   [x] Initialize a persistent ChromaDB client and add the chunks, embeddings, and metadata to a collection.
+    -   [x] Integrate `index_document` into the Celery task.
 
--   [ ] **3.3: RAG - Retrieval and Generation**
-    -   [ ] Implement the `query_document` function in `app/rag/pipeline.py`.
-    -   [ ] This function should take a question, embed it, and query ChromaDB for the most relevant chunks.
-    -   [ ] Create the `GET /query` API endpoint that calls `query_document`.
-    -   [ ] Install `google-generativeai`.
-    -   [ ] In the `query_document` function, pass the retrieved context and question to the Gemini API using the RAG prompt template.
-    -   [ ] Return the LLM's answer from the API endpoint.
+-   [x] **3.3: RAG - Retrieval and Generation**
+    -   [x] Implement the `query_document` function in `app/rag/pipeline.py`.
+    -   [x] This function should take a question, embed it, and query ChromaDB for the most relevant chunks.
+    -   [x] Create the `GET /query` API endpoint that calls `query_document`.
+    -   [x] Install `google-generativeai`.
+    -   [x] In the `query_document` function, pass the retrieved context and question to the Gemini API using the RAG prompt template.
+    -   [x] Return the LLM's answer from the API endpoint.
 
--   [ ] **3.4: LLM-based Entity Extraction and Summarization**
-    -   [ ] Create `app/nlp/extraction.py`.
-    -   [ ] Implement `extract_entities` using the Gemini API with the structured JSON prompt.
-    -   [ ] Add Pydantic models for validation of the extracted data.
-    -   [ ] Implement `generate_summary` using a summarization prompt.
-    -   [ ] Integrate both functions into the Celery task and store their results in the database.
-    -   [ ] Create the `GET /summary/{doc_id}` endpoint.
+-   [x] **3.4: LLM-based Entity Extraction and Summarization**
+    -   [x] Create `app/nlp/extraction.py`.
+    -   [x] Implement `extract_entities` using the Gemini API with the structured JSON prompt.
+    -   [x] Add Pydantic models for validation of the extracted data.
+    -   [x] Implement `generate_summary` using a summarization prompt.
+    -   [x] Integrate both functions into the Celery task and store their results in the database.
+    -   [x] Create the `GET /summary/{doc_id}` endpoint.
 
 ## Phase 4: Observability & Testing
 

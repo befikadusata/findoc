@@ -80,6 +80,46 @@ async def get_document_status_endpoint(doc_id: str):
         "updated_at": document_info["updated_at"]
     }
 
+@app.get("/query")
+async def query_document_endpoint(doc_id: str, question: str):
+    """Query a document and get an answer based on its content."""
+    # Verify that the document exists in our system
+    document_info = get_document_status(doc_id)
+
+    if document_info is None:
+        return {"error": "Document not found", "doc_id": doc_id}
+
+    # Use the RAG pipeline to generate a response
+    from app.rag.pipeline import generate_response_with_rag
+    answer = generate_response_with_rag(doc_id, question)
+
+    return {
+        "doc_id": doc_id,
+        "question": question,
+        "answer": answer
+    }
+
+@app.get("/summary/{doc_id}")
+async def get_document_summary_endpoint(doc_id: str):
+    """Get the summary of a document."""
+    # Verify that the document exists in our system
+    document_info = get_document_status(doc_id)
+
+    if document_info is None:
+        return {"error": "Document not found", "doc_id": doc_id}
+
+    # Get the summary from the database
+    from app.database import get_document_summary
+    summary = get_document_summary(doc_id)
+
+    if summary is None:
+        return {"error": "Summary not available", "doc_id": doc_id}
+
+    return {
+        "doc_id": doc_id,
+        "summary": summary
+    }
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
