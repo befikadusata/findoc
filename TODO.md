@@ -31,27 +31,27 @@ This document outlines the step-by-step implementation plan to build the FinDocA
 
 ## Phase 2: Document Ingestion & Processing Pipeline
 
--   [ ] **2.1: Implement Document Upload API**
-    -   [ ] Create the `POST /upload` endpoint in `app/main.py`.
-    -   [ ] Implement file handling to save the `UploadFile` to the `./data/uploads` directory.
-    -   [ ] Assign a unique `doc_id` (using `uuid`) to each file.
+-   [x] **2.1: Implement Document Upload API**
+    -   [x] Create the `POST /upload` endpoint in `app/main.py`.
+    -   [x] Implement file handling to save the `UploadFile` to the `./data/uploads` directory.
+    -   [x] Assign a unique `doc_id` (using `uuid`) to each file.
 
--   [ ] **2.2: Set Up Celery Worker**
-    -   [ ] Create `app/worker.py` to define the Celery app instance and configure the broker URL.
-    -   [ ] Create a task `process_document(doc_id, filepath)` that will contain the main processing logic.
-    -   [ ] Call `process_document.delay()` from the `/upload` endpoint.
+-   [x] **2.2: Set Up Celery Worker**
+    -   [x] Create `app/worker.py` to define the Celery app instance and configure the broker URL.
+    -   [x] Create a task `process_document(doc_id, filepath)` that will contain the main processing logic.
+    -   [x] Call `process_document.delay()` from the `/upload` endpoint.
 
--   [ ] **2.3: Implement Metadata and Status Tracking**
-    -   [ ] Set up a simple database module (e.g., `app/database.py`) using SQLite for the portfolio project.
-    -   [ ] Create a table to store document metadata (`doc_id`, `filename`, `status`, `created_at`).
-    -   [ ] Update the database with `queued` status upon upload.
-    -   [ ] Create the `GET /status/{doc_id}` endpoint to fetch and return the document's status.
+-   [x] **2.3: Implement Metadata and Status Tracking**
+    -   [x] Set up a simple database module (e.g., `app/database.py`) using SQLite for the portfolio project.
+    -   [x] Create a table to store document metadata (`doc_id`, `filename`, `status`, `created_at`).
+    -   [x] Update the database with `queued` status upon upload.
+    -   [x] Create the `GET /status/{doc_id}` endpoint to fetch and return the document's status.
 
--   [ ] **2.4: Implement OCR & Text Extraction**
-    -   [ ] Create `app/ingestion/ocr.py`.
-    -   [ ] Install `pytesseract`, `pdf2image`, and `PyPDF2`.
-    -   [ ] Implement the `extract_text` function with the hybrid (PyPDF2 + Tesseract) approach.
-    -   [ ] Integrate the call to `extract_text` at the beginning of the `process_document` Celery task.
+-   [x] **2.4: Implement OCR & Text Extraction**
+    -   [x] Create `app/ingestion/ocr.py`.
+    -   [x] Install `pytesseract`, `pdf2image`, and `PyPDF2`.
+    -   [x] Implement the `extract_text` function with the hybrid (PyPDF2 + Tesseract) approach.
+    -   [x] Integrate the call to `extract_text` at the beginning of the `process_document` Celery task.
 
 ## Phase 3: AI/ML Model Integration
 
