@@ -9,6 +9,13 @@ from celery import Celery
 # Import the database module
 from app.database import init_db, create_document_record, update_document_status, get_document_status
 
+# Import prometheus instrumentation
+from prometheus_fastapi_instrumentator import Instrumentator
+
+# Import structured logging
+from app.utils.logging_config import get_logger
+logger = get_logger(__name__)
+
 # Configure Celery app to match the worker configuration
 redis_host = os.getenv('REDIS_HOST', 'localhost')
 redis_port = os.getenv('REDIS_PORT', '6380')  # Using port 6380 as per our docker-compose setup
@@ -22,6 +29,9 @@ init_db()
 
 app = FastAPI(title="FinDocAI", version="1.0.0", description="Intelligent Financial Document Processing API")
 
+# Instrument the app with Prometheus metrics
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+
 @app.get("/")
 async def root():
     return {"message": "Welcome to FinDocAI - Intelligent Financial Document Processing API", "status": "running"}
@@ -34,6 +44,11 @@ async def health_check():
 async def upload_document(file: UploadFile = File(...)):
     # Generate a unique document ID
     doc_id = str(uuid.uuid4())
+
+    # Add document ID to logger context
+    upload_logger = logger.bind(doc_id=doc_id, filename=file.filename)
+
+    upload_logger.info("Starting document upload")
 
     # Create the uploads directory if it doesn't exist
     upload_dir = "./data/uploads"
@@ -52,9 +67,13 @@ async def upload_document(file: UploadFile = File(...)):
     # Update the document status to 'queued' before starting processing
     update_document_status(doc_id, 'queued')
 
+    upload_logger.info("Document saved and status updated to queued")
+
     # Trigger the document processing task asynchronously
     # This will be executed by a Celery worker
     task = celery_app.send_task('process_document', args=[doc_id, file_path])
+
+    upload_logger.info("Processing task queued", task_id=task.id)
 
     return {
         "doc_id": doc_id,

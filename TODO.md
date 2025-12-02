@@ -89,43 +89,49 @@ This document outlines the step-by-step implementation plan to build the FinDocA
 
 ## Phase 4: Observability & Testing
 
--   [ ] **4.1: Implement Metrics**
-    -   [ ] Install `prometheus-fastapi-instrumentator`.
-    -   [ ] Instrument the FastAPI app to expose a `/metrics` endpoint.
-    -   [ ] Add custom Celery metrics (e.g., `processing_duration` histogram) using `prometheus_client`.
+-   [x] **4.1: Implement Metrics**
+    -   [x] Install `prometheus-fastapi-instrumentator`.
+    -   [x] Instrument the FastAPI app to expose a `/metrics` endpoint.
+    -   [x] Add custom Celery metrics (e.g., `processing_duration` histogram) using `prometheus_client`.
 
--   [ ] **4.2: Set Up Monitoring Stack**
-    -   [ ] Create `docker-compose.monitoring.yml` to run Prometheus and Grafana.
-    -   [ ] Configure Prometheus to scrape the FastAPI `/metrics` endpoint.
-    -   [ ] Log in to Grafana, connect the Prometheus data source, and create a basic dashboard with key metrics (requests, latency, queue depth).
+-   [x] **4.2: Set Up Monitoring Stack**
+    -   [x] Create `docker-compose.monitoring.yml` to run Prometheus and Grafana.
+    -   [x] Configure Prometheus to scrape the FastAPI `/metrics` endpoint.
+    -   [x] Log in to Grafana, connect the Prometheus data source, and create a basic dashboard with key metrics (requests, latency, queue depth).
 
--   [ ] **4.3: Add Structured Logging**
-    -   [ ] Install `structlog`.
-    -   [ ] Configure `structlog` to output JSON-formatted logs for both FastAPI and Celery.
-    -   [ ] Add contextual logging throughout the pipeline (e.g., `doc_id`, `doc_type`).
+-   [x] **4.3: Add Structured Logging**
+    -   [x] Install `structlog`.
+    -   [x] Configure `structlog` to output JSON-formatted logs for both FastAPI and Celery.
+    -   [x] Add contextual logging throughout the pipeline (e.g., `doc_id`, `doc_type`).
 
--   [ ] **4.4: Write Tests**
+## Phase 5: Testing
+
+-   [ ] **5.1: Write Tests**
     -   [ ] Install `pytest`.
-    -   [ ] Write unit tests for key functions (`extract_text`, `classify_document`).
+    -   [ ] Write unit tests for key functions (`extract_text`, `classify_document`, `index_document`, `generate_response_with_rag`).
     -   [ ] Write an integration test for the `POST /upload` endpoint that mocks the file and checks the final status via the `/status` endpoint.
+    -   [ ] Write unit tests for the database module functions.
+    -   [ ] Write unit tests for the RAG pipeline functions.
+    -   [ ] Write unit tests for the NLP extraction functions.
     -   [ ] Install `locust` and create a `load_test.py` script to simulate user traffic.
+    -   [ ] Run all tests to ensure they pass.
 
-## Phase 5: Documentation & Finalization
+## Phase 6: Documentation & Finalization
 
--   [ ] **5.1: Create Project README**
+-   [ ] **6.1: Create Project README**
     -   [ ] Write a comprehensive `README.md` at the project root.
     -   [ ] Include a project overview, features, and detailed setup instructions.
 
--   [ ] **5.2: Finalize All Documentation**
+-   [ ] **6.2: Finalize All Documentation**
     -   [ ] Review and refine all documents in the `docs/` directory to ensure they are accurate and professional.
     -   [ ] Add diagrams and code snippets where helpful.
 
--   [ ] **5.3: Create Helper Scripts**
+-   [ ] **6.3: Create Helper Scripts**
     -   [ ] Finalize `scripts/init_db.py` to create the SQLite database and table.
     -   [ ] Finalize `scripts/download_models.py` to ensure all necessary ML models are downloaded.
     -   [ ] (Optional) Create a `run.sh` script to easily start all services (Uvicorn, Celery).
 
--   [ ] **5.4: Code Cleanup and Review**
+-   [ ] **6.4: Code Cleanup and Review**
     -   [ ] Format all code using `black` and `isort`.
     -   [ ] Add comments and type hints where necessary for clarity.
     -   [ ] Review all code for potential bugs or performance improvements.

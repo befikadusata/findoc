@@ -1,0 +1,130 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "FinDocAI Application Dashboard",
+    "tags": ["findocai", "fastapi", "celery", "redis"],
+    "style": "dark",
+    "timezone": "browser",
+    "version": 1,
+    "refresh": "5s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "API Requests",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total[1m]))",
+            "legendFormat": "Requests per second"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Requests/s"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "API Response Time",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "95th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "50th percentile"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Seconds"
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Document Processing Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "sum(rate(document_processing_total[1m])) by (status)",
+            "legendFormat": "{{status}}"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Documents/min"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Document Processing Duration",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(document_processing_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "95th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(document_processing_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "50th percentile"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Seconds"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Currently Processing Documents",
+        "type": "singlestat",
+        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "document_processing_current",
+            "legendFormat": "Active Processes"
+          }
+        ],
+        "valueName": "current",
+        "prefix": "",
+        "postfix": " docs"
+      },
+      {
+        "id": 6,
+        "title": "Redis Queue Depth (Celery)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 18, "x": 6, "y": 16},
+        "targets": [
+          {
+            "expr": "redis_db_keys_total{db=\"0\"}",
+            "legendFormat": "Queue depth"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Items"
+          }
+        ]
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h", "2h", "1d"]
+    }
+  },
+  "folderId": 0,
+  "overwrite": false
+}
