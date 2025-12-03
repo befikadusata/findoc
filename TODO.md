@@ -42,7 +42,7 @@ This document outlines the step-by-step implementation plan to build the FinDocA
     -   [x] Call `process_document.delay()` from the `/upload` endpoint.
 
 -   [x] **2.3: Implement Metadata and Status Tracking**
-    -   [x] Set up a simple database module (e.g., `app/database.py`) using SQLite for the portfolio project.
+    -   [x] Set up a database module (e.g., `app/database.py`) using PostgreSQL for the portfolio project.
     -   [x] Create a table to store document metadata (`doc_id`, `filename`, `status`, `created_at`).
     -   [x] Update the database with `queued` status upon upload.
     -   [x] Create the `GET /status/{doc_id}` endpoint to fetch and return the document's status.
@@ -106,15 +106,15 @@ This document outlines the step-by-step implementation plan to build the FinDocA
 
 ## Phase 5: Testing
 
--   [ ] **5.1: Write Tests**
-    -   [ ] Install `pytest`.
-    -   [ ] Write unit tests for key functions (`extract_text`, `classify_document`, `index_document`, `generate_response_with_rag`).
-    -   [ ] Write an integration test for the `POST /upload` endpoint that mocks the file and checks the final status via the `/status` endpoint.
-    -   [ ] Write unit tests for the database module functions.
-    -   [ ] Write unit tests for the RAG pipeline functions.
-    -   [ ] Write unit tests for the NLP extraction functions.
-    -   [ ] Install `locust` and create a `load_test.py` script to simulate user traffic.
-    -   [ ] Run all tests to ensure they pass.
+-   [x] **5.1: Write Tests**
+    -   [x] Install `pytest`.
+    -   [x] Write unit tests for key functions (`extract_text`, `classify_document`, `index_document`, `generate_response_with_rag`).
+    -   [x] Write an integration test for the `POST /upload` endpoint that mocks the file and checks the final status via the `/status` endpoint.
+    -   [x] Write unit tests for the database module functions.
+    -   [x] Write unit tests for the RAG pipeline functions.
+    -   [x] Write unit tests for the NLP extraction functions.
+    -   [x] Install `locust` and create a `load_test.py` script to simulate user traffic.
+    -   [x] Run all tests to ensure they pass.
 
 ## Phase 6: Documentation & Finalization
 
@@ -127,7 +127,7 @@ This document outlines the step-by-step implementation plan to build the FinDocA
     -   [ ] Add diagrams and code snippets where helpful.
 
 -   [ ] **6.3: Create Helper Scripts**
-    -   [ ] Finalize `scripts/init_db.py` to create the SQLite database and table.
+    -   [ ] Finalize `scripts/init_db.py` to create the PostgreSQL database and table.
     -   [ ] Finalize `scripts/download_models.py` to ensure all necessary ML models are downloaded.
     -   [ ] (Optional) Create a `run.sh` script to easily start all services (Uvicorn, Celery).
 
