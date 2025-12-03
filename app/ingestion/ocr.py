@@ -10,7 +10,7 @@ import os
 import pytesseract
 from PIL import Image
 from pdf2image import convert_from_path
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 import tempfile
 
 # Import structured logging

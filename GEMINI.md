@@ -42,7 +42,7 @@ This document outlines the step-by-step implementation plan to build the FinDocA
     -   [ ] Call `process_document.delay()` from the `/upload` endpoint.
 
 -   [ ] **2.3: Implement Metadata and Status Tracking**
-    -   [ ] Set up a simple database module (e.g., `app/database.py`) using SQLite for the portfolio project.
+    -   [ ] Set up a database module (e.g., `app/database.py`) using PostgreSQL for the portfolio project.
     -   [ ] Create a table to store document metadata (`doc_id`, `filename`, `status`, `created_at`).
     -   [ ] Update the database with `queued` status upon upload.
     -   [ ] Create the `GET /status/{doc_id}` endpoint to fetch and return the document's status.
@@ -121,7 +121,7 @@ This document outlines the step-by-step implementation plan to build the FinDocA
     -   [ ] Add diagrams and code snippets where helpful.
 
 -   [ ] **5.3: Create Helper Scripts**
-    -   [ ] Finalize `scripts/init_db.py` to create the SQLite database and table.
+    -   [ ] Finalize `scripts/init_db.py` to create the PostgreSQL database and table.
     -   [ ] Finalize `scripts/download_models.py` to ensure all necessary ML models are downloaded.
     -   [ ] (Optional) Create a `run.sh` script to easily start all services (Uvicorn, Celery).
 

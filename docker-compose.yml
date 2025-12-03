@@ -11,5 +11,19 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes
 
+  postgres:
+    image: postgres:15.3-alpine
+    container_name: findocai-postgres
+    environment:
+      POSTGRES_DB: findocai
+      POSTGRES_USER: findocai_user
+      POSTGRES_PASSWORD: findocai_password
+    ports:
+      - "5434:5432"  # Changed to 5434 to avoid conflicts
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
 volumes:
   redis_data:
+  postgres_data:

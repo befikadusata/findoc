@@ -142,13 +142,13 @@ def extract_entities(text: str, doc_type: str = "financial") -> Dict[str, Any]:
             
             # Validate with Pydantic model
             validated_entities = FinancialEntity(**entities)
-            return validated_entities.dict(exclude_unset=True)
+            return validated_entities.model_dump(exclude_unset=True)
         else:
             return FinancialEntity().dict(exclude_unset=True)
             
     except json.JSONDecodeError as e:
         print(f"JSON decode error: {e}")
-        return FinancialEntity().dict(exclude_unset=True)
+        return FinancialEntity().model_dump(exclude_unset=True)
     except Exception as e:
         print(f"Error extracting entities: {e}")
         return {"error": str(e)}
@@ -217,13 +217,13 @@ def generate_summary(text: str, doc_type: str = "financial", max_length: int = 3
             
             # Validate with Pydantic model
             validated_summary = SummaryResult(**summary_data)
-            return validated_summary.dict(exclude_unset=True)
+            return validated_summary.model_dump(exclude_unset=True)
         else:
-            return SummaryResult(summary="Could not generate summary", key_points=[], document_type=doc_type).dict(exclude_unset=True)
-            
+            return SummaryResult(summary="Could not generate summary", key_points=[], document_type=doc_type).model_dump(exclude_unset=True)
+
     except json.JSONDecodeError as e:
         print(f"JSON decode error: {e}")
-        return SummaryResult(summary="Could not generate summary", key_points=[], document_type=doc_type).dict(exclude_unset=True)
+        return SummaryResult(summary="Could not generate summary", key_points=[], document_type=doc_type).model_dump(exclude_unset=True)
     except Exception as e:
         print(f"Error generating summary: {e}")
         return {"error": str(e)}

@@ -43,7 +43,7 @@ The FinDocAI system is designed as a modular, asynchronous pipeline to handle th
 ┌──────────────────────────────────────────────────────┐
 │              Storage & Retrieval Layer                │
 │  ┌─────────────┐  ┌─────────────┐  ┌────────────┐  │
-│  │  SQLite     │  │  Chroma DB  │  │ Local FS   │  │
+│  │ PostgreSQL  │  │  Chroma DB  │  │ Local FS   │  │
 │  │  (metadata) │  │  (vectors)  │  │ (raw docs) │  │
 │  └─────────────┘  └─────────────┘  └────────────┘  │
 └──────────────────────────────────────────────────────┘

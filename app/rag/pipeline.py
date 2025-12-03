@@ -13,7 +13,7 @@ from pathlib import Path
 from sentence_transformers import SentenceTransformer
 import chromadb
 from chromadb.config import Settings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
 class RAGPipeline:
@@ -207,9 +207,12 @@ class RAGPipeline:
             # Create embedding for the query
             query_embedding = self.encoder.encode([query])
 
+            # Ensure the embedding is in the right format
+            query_embedding_list = query_embedding[0].tolist() if hasattr(query_embedding[0], 'tolist') else query_embedding[0]
+
             # Query the collection
             results = collection.query(
-                query_embeddings=[query_embedding[0].tolist()],
+                query_embeddings=[query_embedding_list],
                 n_results=n_results
             )
 

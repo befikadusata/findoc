@@ -43,7 +43,7 @@ class DocumentClassifier:
                 "text-classification",
                 model=self.model_path,
                 tokenizer=self.model_path,
-                return_all_scores=True,
+                top_k=None,  # Use top_k instead of deprecated return_all_scores=True
                 device=0 if torch.cuda.is_available() else -1  # Use GPU if available
             )
             self.logger.info("Classifier initialized successfully")
@@ -82,12 +82,10 @@ class DocumentClassifier:
             results = self.classifier(text)
 
             # Process results to get top_k predictions
-            if isinstance(results[0], list):
-                # Handle the case where return_all_scores=True returns a list of lists
-                top_results = results[0][:top_k]
-            else:
-                # Handle other result formats
-                top_results = sorted(results, key=lambda x: x['score'], reverse=True)[:top_k]
+            # With top_k=None, results come as [[{'label': ..., 'score': ...}, ...]]
+            # Extract the inner list
+            inner_results = results[0] if isinstance(results, list) and len(results) > 0 and isinstance(results[0], list) else results
+            top_results = sorted(inner_results, key=lambda x: x['score'], reverse=True)[:top_k]
 
             # Map generic labels to document types
             label_mapping = {

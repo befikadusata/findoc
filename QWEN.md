@@ -37,7 +37,7 @@ The system follows a microservices-like architecture with these main components:
 - Vector storage and retrieval for RAG functionality
 
 ### Storage Layer
-- SQLite for metadata storage
+- PostgreSQL for metadata storage
 - ChromaDB for vector embeddings storage
 - Local filesystem for raw document storage
 
