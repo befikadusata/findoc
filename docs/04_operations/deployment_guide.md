@@ -9,9 +9,9 @@ This setup is intended for development and testing on a local machine.
 ```bash
 # 1. Install system dependencies
 # Ensure you have Python 3.10+, pip, and venv installed.
-# Tesseract is required for OCR and Redis for the message queue.
+# Tesseract is required for OCR, Redis for the message queue, and PostgreSQL for metadata storage.
 sudo apt update
-sudo apt install -y tesseract-ocr redis-server
+sudo apt install -y tesseract-ocr redis-server postgresql postgresql-contrib
 
 # 2. Clone the repository and set up the environment
 git clone https://github.com/yourname/findocai.git
@@ -20,18 +20,28 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# 3. Set environment variables
+# 3. Set up PostgreSQL database
+# Create a database user and database for the application
+sudo -u postgres createuser --pwprompt findocai_user
+sudo -u postgres createdb findocai -O findocai_user
+
+# 4. Set environment variables
 # Create a .env file or export these variables in your shell.
 export GEMINI_API_KEY="your_google_ai_api_key"
-export REDIS_URL="redis://localhost:6379/0"
+export DB_HOST="localhost"
+export DB_PORT="5434"  # If using the docker-compose setup
+export DB_NAME="findocai"
+export DB_USER="findocai_user"
+export DB_PASSWORD="your_db_password"
+export REDIS_HOST="localhost"
+export REDIS_PORT="6380"  # Using port 6380 as per docker-compose setup
 
-# 4. Initialize database and download ML models
+# 5. Initialize database and download ML models
 python scripts/init_db.py
-python scripts/download_models.py
 
-# 5. Start services (in separate terminal windows)
-# Start the Redis server (if not already running)
-redis-server
+# 6. Start services (in separate terminal windows)
+# Start the PostgreSQL and Redis services using Docker Compose
+docker-compose up -d postgres redis
 
 # Start a Celery worker to process tasks
 celery -A app.worker worker --loglevel=info --concurrency=2
@@ -39,7 +49,7 @@ celery -A app.worker worker --loglevel=info --concurrency=2
 # Start the FastAPI web server
 uvicorn app.main:app --reload --port 8000
 
-# 6. Optional: Start the monitoring stack
+# 7. Optional: Start the monitoring stack
 # This requires Docker and Docker Compose.
 docker-compose -f docker-compose.monitoring.yml up -d
 ```

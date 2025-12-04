@@ -10,7 +10,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any, List
 import json
 
 # Import structured logging
@@ -27,7 +27,15 @@ logger = get_logger(__name__)
 
 
 def get_db_connection():
-    """Get a connection to the PostgreSQL database."""
+    """
+    Get a connection to the PostgreSQL database.
+
+    Returns:
+        Database connection object
+
+    Raises:
+        psycopg2.Error: If connection fails
+    """
     try:
         conn = psycopg2.connect(
             host=DB_HOST,
@@ -42,8 +50,13 @@ def get_db_connection():
         raise
 
 
-def init_db():
-    """Initialize the database and create the documents table if it doesn't exist."""
+def init_db() -> None:
+    """
+    Initialize the database and create the documents table if it doesn't exist.
+
+    Raises:
+        psycopg2.Error: If database initialization fails
+    """
     try:
         # Connect to PostgreSQL with autocommit to create database
         conn = psycopg2.connect(
@@ -55,21 +68,21 @@ def init_db():
         )
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         cursor = conn.cursor()
-        
+
         # Create database if it doesn't exist
         cursor.execute(f"SELECT 1 FROM pg_catalog.pg_database WHERE datname = '{DB_NAME}'")
         exists = cursor.fetchone()
         if not exists:
             cursor.execute(f"CREATE DATABASE {DB_NAME}")
             logger.info(f"Created database {DB_NAME}")
-        
+
         cursor.close()
         conn.close()
-        
+
         # Now connect to the specific database to create tables
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         # Create the documents table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS documents (
@@ -96,7 +109,16 @@ def init_db():
 
 
 def create_document_record(doc_id: str, filename: str) -> bool:
-    """Create a new document record in the database with 'uploaded' status."""
+    """
+    Create a new document record in the database with 'uploaded' status.
+
+    Args:
+        doc_id: Unique document identifier
+        filename: Name of the document file
+
+    Returns:
+        True if record was created successfully, False otherwise
+    """
     db_logger = logger.bind(doc_id=doc_id, filename=filename)
     db_logger.info("Creating document record")
 
@@ -119,7 +141,16 @@ def create_document_record(doc_id: str, filename: str) -> bool:
 
 
 def update_document_status(doc_id: str, status: str) -> bool:
-    """Update the status of a document in the database."""
+    """
+    Update the status of a document in the database.
+
+    Args:
+        doc_id: Unique document identifier
+        status: New status value
+
+    Returns:
+        True if status was updated successfully, False otherwise
+    """
     db_logger = logger.bind(doc_id=doc_id, status=status)
     db_logger.info("Updating document status")
 
@@ -143,8 +174,16 @@ def update_document_status(doc_id: str, status: str) -> bool:
         return False
 
 
-def get_document_status(doc_id: str) -> Optional[dict]:
-    """Get the status of a document from the database."""
+def get_document_status(doc_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get the status of a document from the database.
+
+    Args:
+        doc_id: Unique document identifier
+
+    Returns:
+        Dictionary with document status info, or None if not found
+    """
     db_logger = logger.bind(doc_id=doc_id)
     db_logger.info("Retrieving document status")
 
@@ -173,8 +212,13 @@ def get_document_status(doc_id: str) -> Optional[dict]:
         return None
 
 
-def get_all_documents() -> list:
-    """Get all documents from the database."""
+def get_all_documents() -> List[Dict[str, Any]]:
+    """
+    Get all documents from the database.
+
+    Returns:
+        List of dictionaries with document status info
+    """
     logger.info("Retrieving all documents")
     try:
         conn = get_db_connection()
@@ -192,8 +236,17 @@ def get_all_documents() -> list:
         return []
 
 
-def update_document_summary(doc_id: str, summary_data: dict) -> bool:
-    """Update the summary information for a document."""
+def update_document_summary(doc_id: str, summary_data: Dict[str, Any]) -> bool:
+    """
+    Update the summary information for a document.
+
+    Args:
+        doc_id: Unique document identifier
+        summary_data: Dictionary with summary information
+
+    Returns:
+        True if summary was updated successfully, False otherwise
+    """
     db_logger = logger.bind(doc_id=doc_id)
     db_logger.info("Updating document summary")
 
@@ -220,8 +273,16 @@ def update_document_summary(doc_id: str, summary_data: dict) -> bool:
         return False
 
 
-def get_document_summary(doc_id: str) -> Optional[dict]:
-    """Get the summary of a document from the database."""
+def get_document_summary(doc_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get the summary of a document from the database.
+
+    Args:
+        doc_id: Unique document identifier
+
+    Returns:
+        Dictionary with document summary, or None if not found
+    """
     db_logger = logger.bind(doc_id=doc_id)
     db_logger.info("Retrieving document summary")
 
@@ -244,8 +305,17 @@ def get_document_summary(doc_id: str) -> Optional[dict]:
         return None
 
 
-def update_document_entities(doc_id: str, entities_data: dict) -> bool:
-    """Update the entities information for a document."""
+def update_document_entities(doc_id: str, entities_data: Dict[str, Any]) -> bool:
+    """
+    Update the entities information for a document.
+
+    Args:
+        doc_id: Unique document identifier
+        entities_data: Dictionary with entity information
+
+    Returns:
+        True if entities were updated successfully, False otherwise
+    """
     db_logger = logger.bind(doc_id=doc_id)
     db_logger.info("Updating document entities")
 
@@ -272,8 +342,16 @@ def update_document_entities(doc_id: str, entities_data: dict) -> bool:
         return False
 
 
-def get_document_entities(doc_id: str) -> Optional[dict]:
-    """Get the entities of a document from the database."""
+def get_document_entities(doc_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get the entities of a document from the database.
+
+    Args:
+        doc_id: Unique document identifier
+
+    Returns:
+        Dictionary with document entities, or None if not found
+    """
     db_logger = logger.bind(doc_id=doc_id)
     db_logger.info("Retrieving document entities")
 
@@ -294,3 +372,8 @@ def get_document_entities(doc_id: str) -> Optional[dict]:
     except (psycopg2.Error, json.JSONDecodeError) as e:
         db_logger.error("Failed to retrieve document entities", error=str(e))
         return None
+
+
+if __name__ == "__main__":
+    # Initialize the database when run directly
+    init_db()

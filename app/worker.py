@@ -1,6 +1,7 @@
 from celery import Celery
 import os
 from datetime import datetime
+from typing import Any, Dict
 
 # Import prometheus client for custom metrics
 from prometheus_client import Counter, Histogram, Gauge
@@ -38,7 +39,6 @@ DOCUMENT_PROCESSING_CURRENT = Gauge(
 )
 
 # Configure the broker URL - using Redis
-# When using docker-compose, the service name 'redis' is used as the hostname
 redis_host = os.getenv('REDIS_HOST', 'localhost')
 redis_port = os.getenv('REDIS_PORT', '6380')  # Using port 6380 as per our docker-compose setup
 redis_url = f'redis://{redis_host}:{redis_port}/0'
@@ -57,13 +57,20 @@ celery_app.conf.update(
 )
 
 @celery_app.task(bind=True, name='process_document')
-def process_document(self, doc_id: str, filepath: str):
+def process_document(self, doc_id: str, filepath: str) -> Dict[str, Any]:
     """
     Process the uploaded document asynchronously.
 
-    This function now includes OCR and text extraction as the first step,
+    This function includes OCR and text extraction as the first step,
     followed by document classification, vector indexing, entity extraction,
     and summarization.
+
+    Args:
+        doc_id: The unique identifier of the document
+        filepath: Path to the document file
+
+    Returns:
+        Dict[str, Any]: Processing results with status and metrics
     """
     # Get a logger instance with document context
     task_logger = get_logger("worker.process_document").bind(doc_id=doc_id, filepath=filepath)
@@ -106,9 +113,6 @@ def process_document(self, doc_id: str, filepath: str):
 
             # Update document status with the document type
             update_document_status(doc_id, f'classified_as_{doc_type}')
-
-            # Store the classification result in the database or pass it forward
-            # For now, we'll just log it; in a real system you might extend the database schema
         else:
             task_logger.warning("Document classification failed")
             # Update document status to 'classification_failed' if needed

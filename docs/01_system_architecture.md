@@ -35,7 +35,7 @@ The FinDocAI system is designed as a modular, asynchronous pipeline to handle th
 │              Processing Pipeline                      │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
 │  │ Tesseract│→ │Classifier│→ │ LLM (Gemini/     │  │
-│  │ PyPDF2   │  │DistilBERT│  │ Mistral-Ollama)  │  │
+│  │ pypdf    │  │DistilBERT│  │ Mistral-Ollama)  │  │
 │  └──────────┘  └──────────┘  └──────────────────┘  │
 └─────────┬────────────────────────────────────────────┘
           │
