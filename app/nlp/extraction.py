@@ -12,6 +12,12 @@ from pydantic import BaseModel, Field
 
 import google.generativeai as genai
 
+# Import centralized settings
+from app.config import settings
+
+# Import structured logging
+from app.utils.logging_config import get_logger
+
 
 class FinancialEntity(BaseModel):
     """
@@ -74,59 +80,63 @@ def extract_entities(text: str, doc_type: str = "financial") -> Dict[str, Any]:
         Dict[str, Any]: Extracted entities in structured format
     """
     try:
-        # Get the API key from environment variable
-        api_key = os.getenv('GEMINI_API_KEY')
-        if not api_key:
-            return {"error": "GEMINI_API_KEY environment variable not set"}
+        # Get the API key from centralized settings
+        if settings.gemini_api_key is None:
+            return {"error": "GEMINI_API_KEY is not set in configuration"}
         
-        # Configure the API
-        genai.configure(api_key=api_key)
+        genai.configure(api_key=settings.gemini_api_key.get_secret_value())
         
         # Select the model
         model = genai.GenerativeModel('gemini-pro')
         
-        # Create the entity extraction prompt
-        prompt = f"""
-        Extract structured information from the following {doc_type} document text.
-        Return the result as a JSON object with the following fields (only include fields that are found in the document):
-        - invoice_number
-        - invoice_date (YYYY-MM-DD format)
-        - due_date (YYYY-MM-DD format)
-        - total_amount (as a number)
-        - subtotal (as a number)
-        - tax_amount (as a number)
-        - discount_amount (as a number)
-        - customer_name
-        - customer_address
-        - vendor_name
-        - vendor_address
-        - contract_terms
-        - loan_amount (as a number)
-        - interest_rate (as a number)
-        - repayment_schedule
-        - account_number
-        - account_holder
-        - opening_balance (as a number)
-        - closing_balance (as a number)
-        - document_type
-        - document_date (YYYY-MM-DD format)
-        
-        The output should be a valid JSON object. Only include fields that are explicitly present in the text.
-        For monetary values, extract as numbers without currency symbols.
-        For dates, extract in YYYY-MM-DD format or as close to that as possible.
-        
-        Document text:
-        {text}
-        
-        JSON Output:
-        """
+        # Use the prompt manager to get the entity extraction prompt
+        from prompts.prompt_manager import render_entity_extraction_prompt
+        prompt = render_entity_extraction_prompt(doc_type=doc_type, text=text)
+
+        if not prompt:
+            # Fallback to default prompt if template rendering fails
+            prompt = f"""
+            Extract structured information from the following {doc_type} document text.
+            Return the result as a JSON object with the following fields (only include fields that are found in the document):
+            - invoice_number
+            - invoice_date (YYYY-MM-DD format)
+            - due_date (YYYY-MM-DD format)
+            - total_amount (as a number)
+            - subtotal (as a number)
+            - tax_amount (as a number)
+            - discount_amount (as a number)
+            - customer_name
+            - customer_address
+            - vendor_name
+            - vendor_address
+            - contract_terms
+            - loan_amount (as a number)
+            - interest_rate (as a number)
+            - repayment_schedule
+            - account_number
+            - account_holder
+            - opening_balance (as a number)
+            - closing_balance (as a number)
+            - document_type
+            - document_date (YYYY-MM-DD format)
+
+            The output should be a valid JSON object. Only include fields that are explicitly present in the text.
+            For monetary values, extract as numbers without currency symbols.
+            For dates, extract in YYYY-MM-DD format or as close to that as possible.
+
+            Document text:
+            {text}
+
+            JSON Output:
+            """
         
         # Generate the content
         response = model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(
                 response_mime_type="application/json"
-            )
+            ),
+            request_options={"timeout": 60}
         )
         
         # Parse the response
@@ -147,10 +157,12 @@ def extract_entities(text: str, doc_type: str = "financial") -> Dict[str, Any]:
             return FinancialEntity().dict(exclude_unset=True)
             
     except json.JSONDecodeError as e:
-        print(f"JSON decode error: {e}")
+        logger = get_logger(__name__)
+        logger.error("JSON decode error in entity extraction", error=str(e))
         return FinancialEntity().model_dump(exclude_unset=True)
     except Exception as e:
-        print(f"Error extracting entities: {e}")
+        logger = get_logger(__name__)
+        logger.error("Error extracting entities", error=str(e))
         return {"error": str(e)}
 
 
@@ -167,41 +179,45 @@ def generate_summary(text: str, doc_type: str = "financial", max_length: int = 3
         Dict[str, Any]: Summary and key points in structured format
     """
     try:
-        # Get the API key from environment variable
-        api_key = os.getenv('GEMINI_API_KEY')
-        if not api_key:
-            return {"error": "GEMINI_API_KEY environment variable not set"}
+        # Get the API key from centralized settings
+        if settings.gemini_api_key is None:
+            return {"error": "GEMINI_API_KEY is not set in configuration"}
         
-        # Configure the API
-        genai.configure(api_key=api_key)
+        genai.configure(api_key=settings.gemini_api_key.get_secret_value())
         
         # Select the model
         model = genai.GenerativeModel('gemini-pro')
         
-        # Create the summarization prompt
-        prompt = f"""
-        Create a concise summary of this {doc_type} document. The summary should be no more than {max_length} characters.
-        Also extract 3-5 key points from the document.
-        
-        Document text:
-        {text[:4000]}  # Limiting to 4000 chars to avoid token limits
-        
-        Provide the output as a JSON object with these fields:
-        - summary: The summary text
-        - key_points: Array of key points
-        - document_type: The type of document
-        - document_date: Document date if mentioned in the text
-        - extracted_entities: Only include if you can identify significant entities
-        
-        JSON Output:
-        """
+        # Use the prompt manager to get the summarization prompt
+        from prompts.prompt_manager import render_summarization_prompt
+        prompt = render_summarization_prompt(doc_type=doc_type, text_truncated=text[:4000], max_length=max_length)
+
+        if not prompt:
+            # Fallback to default prompt if template rendering fails
+            prompt = f"""
+            Create a concise summary of this {doc_type} document. The summary should be no more than {max_length} characters.
+            Also extract 3-5 key points from the document.
+
+            Document text:
+            {text[:4000]}  # Limiting to 4000 chars to avoid token limits
+
+            Provide the output as a JSON object with these fields:
+            - summary: The summary text
+            - key_points: Array of key points
+            - document_type: The type of document
+            - document_date: Document date if mentioned in the text
+            - extracted_entities: Only include if you can identify significant entities
+
+            JSON Output:
+            """
         
         # Generate the content
         response = model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(
                 response_mime_type="application/json"
-            )
+            ),
+            request_options={"timeout": 60}
         )
         
         # Parse the response
@@ -222,32 +238,37 @@ def generate_summary(text: str, doc_type: str = "financial", max_length: int = 3
             return SummaryResult(summary="Could not generate summary", key_points=[], document_type=doc_type).model_dump(exclude_unset=True)
 
     except json.JSONDecodeError as e:
-        print(f"JSON decode error: {e}")
+        logger = get_logger(__name__)
+        logger.error("JSON decode error in summary generation", error=str(e))
         return SummaryResult(summary="Could not generate summary", key_points=[], document_type=doc_type).model_dump(exclude_unset=True)
     except Exception as e:
-        print(f"Error generating summary: {e}")
+        logger = get_logger(__name__)
+        logger.error("Error generating summary", error=str(e))
         return {"error": str(e)}
 
 
 if __name__ == "__main__":
     # Example usage
+    logger = get_logger(__name__)
     sample_text = """
     INVOICE
     Invoice Number: INV-2023-001
     Date: 2023-06-15
     Due Date: 2023-07-15
-    
+
     Customer: John Smith
     Address: 123 Main St, New York, NY
-    
+
     Item: Consulting Services
     Subtotal: $4,500.00
     Tax: $360.00
     Total: $4,860.00
     """
-    
+
     entities = extract_entities(sample_text, "invoice")
-    print("Extracted entities:", entities)
-    
+    logger.info("Extracted entities", entities=entities)
+
     summary = generate_summary(sample_text, "invoice")
-    print("Generated summary:", summary)
+    logger.info("Generated summary", summary=summary)
+
+

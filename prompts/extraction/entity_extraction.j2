@@ -1,0 +1,34 @@
+{# Entity Extraction Prompt Template #}
+{# Version: 1.0 #}
+Extract structured information from the following {{ doc_type }} document text.
+Return the result as a JSON object with the following fields (only include fields that are found in the document):
+- invoice_number
+- invoice_date (YYYY-MM-DD format)
+- due_date (YYYY-MM-DD format)
+- total_amount (as a number)
+- subtotal (as a number)
+- tax_amount (as a number)
+- discount_amount (as a number)
+- customer_name
+- customer_address
+- vendor_name
+- vendor_address
+- contract_terms
+- loan_amount (as a number)
+- interest_rate (as a number)
+- repayment_schedule
+- account_number
+- account_holder
+- opening_balance (as a number)
+- closing_balance (as a number)
+- document_type
+- document_date (YYYY-MM-DD format)
+
+The output should be a valid JSON object. Only include fields that are explicitly present in the text.
+For monetary values, extract as numbers without currency symbols.
+For dates, extract in YYYY-MM-DD format or as close to that as possible.
+
+Document text:
+{{ text }}
+
+JSON Output:

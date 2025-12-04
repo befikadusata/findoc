@@ -1,14 +1,17 @@
 import os
 import uuid
 from typing import Dict, Any, Optional
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Depends
 import time
 
 # For Celery integration, we'll call the task by name to avoid import issues
 from celery import Celery
 
 # Import the database module
-from app.database import init_db, create_document_record, update_document_status, get_document_status
+from app.database import create_document_record, update_document_status, get_document_status
+
+# Import API schemas for input validation
+from app.api.schemas.request_models import DocumentIdRequest, QueryRequest, DeleteDocumentRequest, SummaryRequest
 
 # Import prometheus instrumentation
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -17,16 +20,11 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from app.utils.logging_config import get_logger
 logger = get_logger(__name__)
 
-# Configure Celery app to match the worker configuration
-redis_host = os.getenv('REDIS_HOST', 'localhost')
-redis_port = os.getenv('REDIS_PORT', '6380')  # Using port 6380 as per our docker-compose setup
-redis_url = f'redis://{redis_host}:{redis_port}/0'
+# Import centralized settings
+from app.config import settings
 
 # Create a Celery instance for calling tasks
-celery_app = Celery('findocai', broker=redis_url)
-
-# Initialize the database
-init_db()
+celery_app = Celery('findocai', broker=settings.redis_url)
 
 app = FastAPI(title="FinDocAI", version="1.0.0", description="Intelligent Financial Document Processing API")
 
@@ -116,6 +114,12 @@ async def get_document_status_endpoint(doc_id: str) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Document status information or error
     """
+    # Validate doc_id format
+    try:
+        DocumentIdRequest(doc_id=doc_id)
+    except Exception:
+        return {"error": "Invalid document ID format", "doc_id": doc_id}
+
     document_info = get_document_status(doc_id)
 
     if document_info is None:
@@ -141,6 +145,12 @@ async def query_document_endpoint(doc_id: str, question: str) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: The answer to the question or error
     """
+    # Validate input parameters
+    try:
+        QueryRequest(doc_id=doc_id, question=question)
+    except Exception as e:
+        return {"error": f"Invalid input parameters: {str(e)}", "doc_id": doc_id}
+
     # Verify that the document exists in our system
     document_info = get_document_status(doc_id)
 
@@ -168,6 +178,12 @@ async def get_document_summary_endpoint(doc_id: str) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Document summary or error
     """
+    # Validate doc_id format
+    try:
+        SummaryRequest(doc_id=doc_id)
+    except Exception:
+        return {"error": "Invalid document ID format", "doc_id": doc_id}
+
     # Verify that the document exists in our system
     document_info = get_document_status(doc_id)
 
@@ -185,6 +201,121 @@ async def get_document_summary_endpoint(doc_id: str) -> Dict[str, Any]:
         "doc_id": doc_id,
         "summary": summary
     }
+
+
+@app.delete("/documents/{doc_id}")
+async def delete_document_endpoint(doc_id: str) -> Dict[str, Any]:
+    """
+    Delete a document and all its associated data.
+
+    Args:
+        doc_id: The unique identifier of the document to delete
+
+    Returns:
+        Dict[str, Any]: Deletion status information
+    """
+    # Validate doc_id format
+    try:
+        DeleteDocumentRequest(doc_id=doc_id)
+    except Exception:
+        return {"error": "Invalid document ID format", "doc_id": doc_id}
+
+    # Verify that the document exists in our system
+    document_info = get_document_status(doc_id)
+
+    if document_info is None:
+        return {"error": "Document not found", "doc_id": doc_id}
+
+    # Import required functions
+    from app.database import (
+        get_document_summary,
+        get_document_entities,
+        delete_document_record
+    )
+    from app.rag.pipeline import delete_document_from_chromadb
+
+    # Log the deletion attempt
+    delete_logger = logger.bind(doc_id=doc_id)
+    delete_logger.info("Starting document deletion process")
+
+    try:
+        # 1. Delete from ChromaDB
+        chroma_deleted = delete_document_from_chromadb(doc_id)
+        delete_logger.info("ChromaDB collection deletion attempted", success=chroma_deleted)
+
+        # 2. Delete from PostgreSQL database
+        db_deleted = delete_document_record(doc_id)
+        delete_logger.info("Database record deletion attempted", success=db_deleted)
+
+        # 3. Delete the actual file from storage
+        file_deleted = delete_document_file(doc_id, document_info["filename"])
+        delete_logger.info("File system deletion attempted", success=file_deleted)
+
+        # Determine overall success
+        overall_success = chroma_deleted and db_deleted and file_deleted
+
+        if overall_success:
+            delete_logger.info("Document deletion completed successfully")
+            return {
+                "message": "Document deleted successfully",
+                "doc_id": doc_id,
+                "deleted_from": {
+                    "chromadb": chroma_deleted,
+                    "database": db_deleted,
+                    "file_system": file_deleted
+                }
+            }
+        else:
+            delete_logger.warning("Document deletion partially failed",
+                                chromadb=chroma_deleted,
+                                database=db_deleted,
+                                file_system=file_deleted)
+            return {
+                "message": "Document deletion partially completed",
+                "doc_id": doc_id,
+                "deleted_from": {
+                    "chromadb": chroma_deleted,
+                    "database": db_deleted,
+                    "file_system": file_deleted
+                }
+            }
+
+    except Exception as e:
+        delete_logger.error("Error occurred during document deletion", error=str(e))
+        return {
+            "error": f"Error occurred during document deletion: {str(e)}",
+            "doc_id": doc_id
+        }
+
+
+def delete_document_file(doc_id: str, filename: str) -> bool:
+    """
+    Delete the actual document file from the file system.
+
+    Args:
+        doc_id: The document ID
+        filename: The original filename
+
+    Returns:
+        bool: True if file was successfully deleted, False otherwise
+    """
+    import os
+
+    file_path = os.path.join("./data/uploads", f"{doc_id}_{filename}")
+
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info("Document file deleted from file system", doc_id=doc_id, file_path=file_path)
+            return True
+        else:
+            logger.warning("Document file not found in file system", doc_id=doc_id, file_path=file_path)
+            return False
+    except Exception as e:
+        logger.error("Error deleting document file from file system",
+                    doc_id=doc_id, file_path=file_path, error=str(e))
+        return False
+
 
 if __name__ == "__main__":
     import uvicorn

@@ -180,4 +180,5 @@ if __name__ == "__main__":
     # Example usage
     sample_text = "INVOICE Date: 2023-06-15 Invoice No: INV-2023-06015 Customer: John Smith Item: Consulting Services Amount: $5,000.00 Due Date: 2023-07-15"
     result = classify_document(sample_text)
-    print("Classification result:", result)
+    logger = get_logger(__name__)
+    logger.info("Classification result", result=result)

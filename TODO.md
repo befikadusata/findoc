@@ -118,20 +118,50 @@ This document outlines the step-by-step implementation plan to build the FinDocA
 
 ## Phase 6: Documentation & Finalization
 
--   [ ] **6.1: Create Project README**
-    -   [ ] Write a comprehensive `README.md` at the project root.
-    -   [ ] Include a project overview, features, and detailed setup instructions.
+-   [x] **6.1: Create Project README**
+    -   [x] Write a comprehensive `README.md` at the project root.
+    -   [x] Include a project overview, features, and detailed setup instructions.
 
--   [ ] **6.2: Finalize All Documentation**
-    -   [ ] Review and refine all documents in the `docs/` directory to ensure they are accurate and professional.
-    -   [ ] Add diagrams and code snippets where helpful.
+-   [x] **6.2: Finalize All Documentation**
+    -   [x] Review and refine all documents in the `docs/` directory to ensure they are accurate and professional.
+    -   [x] Add diagrams and code snippets where helpful.
 
--   [ ] **6.3: Create Helper Scripts**
-    -   [ ] Finalize `scripts/init_db.py` to create the PostgreSQL database and table.
-    -   [ ] Finalize `scripts/download_models.py` to ensure all necessary ML models are downloaded.
-    -   [ ] (Optional) Create a `run.sh` script to easily start all services (Uvicorn, Celery).
+-   [x] **6.3: Create Helper Scripts**
+    -   [x] Finalize `scripts/init_db.py` to create the PostgreSQL database and table.
+    -   [x] Finalize `scripts/download_models.py` to ensure all necessary ML models are downloaded.
+    -   [x] (Optional) Create a `run.sh` script to easily start all services (Uvicorn, Celery).
+    -   [x] Create additional helper scripts (`stop.sh`, `setup.sh`, `health_check.py`).
 
--   [ ] **6.4: Code Cleanup and Review**
-    -   [ ] Format all code using `black` and `isort`.
-    -   [ ] Add comments and type hints where necessary for clarity.
-    -   [ ] Review all code for potential bugs or performance improvements.
+-   [x] **6.4: Code Cleanup and Review**
+    -   [x] Format all code using `black` and `isort`.
+    -   [x] Add comments and type hints where necessary for clarity.
+    -   [x] Review all code for potential bugs or performance improvements.
+
+## Phase 7: System Hardening & Advanced Features
+
+-   [ ] **7.1: Security and Multi-Tenancy**
+    -   [ ] Implement API Authentication (e.g., OAuth2 with JWTs).
+    -   [ ] Implement API Authorization, associating documents with a `user_id` or `tenant_id`.
+    -   [ ] Enforce document ownership checks on all data access endpoints (`/status`, `/query`, `/summary`).
+
+-   [x] **7.2: Robustness and Error Handling**
+    -   [x] Configure Celery to use a **Dead Letter Queue (DLQ)** for tasks that exhaust their retries.
+    -   [x] Refactor the `process_document` Celery task into a **chain of smaller, granular tasks** for better resilience and retriability.
+    -   [x] Implement network timeouts for all external API calls (e.g., Gemini API, sentence transformers download).
+
+-   [x] **7.3: Configuration and Secrets Management**
+    -   [x] Implement a **centralized configuration management** using Pydantic `BaseSettings` to load settings on application startup.
+    -   [x] For production, integrate with a dedicated secrets management solution (e.g., AWS Secrets Manager).
+
+-   [ ] **7.4: Data Management and Governance**
+    -   [ ] Integrate a **database migration tool (e.g., Alembic)** to manage PostgreSQL schema evolution.
+    -   [ ] Implement a **comprehensive data deletion process** via a `DELETE /documents/{doc_id}` API endpoint, ensuring removal from all storage layers (filesystem/S3, PostgreSQL, ChromaDB).
+
+-   [ ] **7.5: MLOps and Model Lifecycle**
+    -   [ ] Implement a **prompt versioning and management system** for LLMs (e.g., externalizing prompts to templated files).
+
+-   [ ] **7.6: Logging Improvements**
+    -   [ ] Replace all `print()` statements with structured logging (using `structlog`) throughout the application.
+
+-   [ ] **7.7: API Input Validation**
+    -   [ ] Add Pydantic validation models to all API endpoints to enforce stricter input validation (e.g., `query` parameter length, `doc_id` format).

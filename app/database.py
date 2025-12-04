@@ -16,12 +16,26 @@ import json
 # Import structured logging
 from app.utils.logging_config import get_logger
 
-# Database connection parameters
-DB_HOST = os.getenv('DB_HOST', 'localhost')
-DB_PORT = os.getenv('DB_PORT', '5434')  # Changed to 5434 to match docker-compose
-DB_NAME = os.getenv('DB_NAME', 'findocai')
-DB_USER = os.getenv('DB_USER', 'findocai_user')
-DB_PASSWORD = os.getenv('DB_PASSWORD', 'findocai_password')
+"""
+PostgreSQL Database Module for FinDocAI
+
+This module provides functions for interacting with a PostgreSQL database
+to store document metadata, status, and processed results.
+"""
+
+import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+from datetime import datetime
+from typing import Optional, Dict, Any, List
+import json
+
+# Import structured logging
+from app.utils.logging_config import get_logger
+
+# Import centralized settings
+from app.config import settings
 
 logger = get_logger(__name__)
 
@@ -38,11 +52,11 @@ def get_db_connection():
     """
     try:
         conn = psycopg2.connect(
-            host=DB_HOST,
-            port=DB_PORT,
-            database=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD
+            host=settings.db_host,
+            port=settings.db_port,
+            database=settings.db_name,
+            user=settings.db_user,
+            password=settings.db_password.get_secret_value()
         )
         return conn
     except psycopg2.Error as e:
@@ -59,22 +73,23 @@ def init_db() -> None:
     """
     try:
         # Connect to PostgreSQL with autocommit to create database
+        # Use 'postgres' as the default database to create/check for 'findocai'
         conn = psycopg2.connect(
-            host=DB_HOST,
-            port=DB_PORT,
+            host=settings.db_host,
+            port=settings.db_port,
             database='postgres',  # Connect to default postgres db to create new db
-            user=DB_USER,
-            password=DB_PASSWORD
+            user=settings.db_user,
+            password=settings.db_password.get_secret_value()
         )
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         cursor = conn.cursor()
 
         # Create database if it doesn't exist
-        cursor.execute(f"SELECT 1 FROM pg_catalog.pg_database WHERE datname = '{DB_NAME}'")
+        cursor.execute(f"SELECT 1 FROM pg_catalog.pg_database WHERE datname = '{settings.db_name}'")
         exists = cursor.fetchone()
         if not exists:
-            cursor.execute(f"CREATE DATABASE {DB_NAME}")
-            logger.info(f"Created database {DB_NAME}")
+            cursor.execute(f"CREATE DATABASE {settings.db_name}")
+            logger.info(f"Created database {settings.db_name}")
 
         cursor.close()
         conn.close()
@@ -102,7 +117,7 @@ def init_db() -> None:
 
         conn.commit()
         conn.close()
-        logger.info("Database initialized", db_host=DB_HOST, db_name=DB_NAME)
+        logger.info("Database initialized", db_host=settings.db_host, db_name=settings.db_name)
     except psycopg2.Error as e:
         logger.error("Failed to initialize database", error=str(e))
         raise
@@ -372,6 +387,35 @@ def get_document_entities(doc_id: str) -> Optional[Dict[str, Any]]:
     except (psycopg2.Error, json.JSONDecodeError) as e:
         db_logger.error("Failed to retrieve document entities", error=str(e))
         return None
+
+
+def delete_document_record(doc_id: str) -> bool:
+    """
+    Delete a document record from the database.
+
+    Args:
+        doc_id: Unique document identifier
+
+    Returns:
+        True if record was deleted successfully, False otherwise
+    """
+    db_logger = logger.bind(doc_id=doc_id)
+    db_logger.info("Deleting document record")
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute('DELETE FROM documents WHERE doc_id = %s', (doc_id,))
+        conn.commit()
+        conn.close()
+
+        rows_affected = cursor.rowcount
+        db_logger.info("Document record deletion completed", rows_affected=rows_affected)
+        return rows_affected > 0
+    except psycopg2.Error as e:
+        db_logger.error("Failed to delete document record", error=str(e))
+        return False
 
 
 if __name__ == "__main__":
