@@ -1,0 +1,16 @@
+{# Document Summarization Prompt Template #}
+{# Version: 1.0 #}
+Create a concise summary of this {{ doc_type }} document. The summary should be no more than {{ max_length }} characters.
+Also extract 3-5 key points from the document.
+
+Document text:
+{{ text_truncated }}  # Limiting to 4000 chars to avoid token limits
+
+Provide the output as a JSON object with these fields:
+- summary: The summary text
+- key_points: Array of key points
+- document_type: The type of document
+- document_date: Document date if mentioned in the text
+- extracted_entities: Only include if you can identify significant entities
+
+JSON Output:

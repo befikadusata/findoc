@@ -5,6 +5,13 @@ This module provides functions for chunking documents, creating embeddings,
 and indexing them in a vector database for retrieval-augmented generation.
 """
 
+"""
+RAG (Retrieval-Augmented Generation) Pipeline Module
+
+This module provides functions for chunking documents, creating embeddings,
+and indexing them in a vector database for retrieval-augmented generation.
+"""
+
 import os
 import uuid
 from typing import List, Dict, Optional
@@ -15,6 +22,11 @@ import chromadb
 from chromadb.config import Settings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+# Import centralized settings
+from app.config import settings
+
+# Import structured logging
+from app.utils.logging_config import get_logger
 
 class RAGPipeline:
     """
@@ -40,7 +52,7 @@ class RAGPipeline:
         try:
             self.encoder = SentenceTransformer(model_name)
         except Exception as e:
-            print(f"Error initializing sentence transformer: {e}")
+            logger.error(f"Error initializing sentence transformer: {e}")
             # Fallback initialization
             self.encoder = None
         
@@ -54,7 +66,8 @@ class RAGPipeline:
                 )
             )
         except Exception as e:
-            print(f"Error initializing ChromaDB client: {e}")
+            logger = get_logger(__name__)
+            logger.error(f"Error initializing ChromaDB client: {e}")
             self.chroma_client = None
     
     def chunk_text(self, text: str, 
@@ -85,82 +98,85 @@ class RAGPipeline:
     def create_embeddings(self, texts: List[str]) -> List[List[float]]:
         """
         Create embeddings for a list of texts using the sentence transformer model.
-        
+
         Args:
             texts (List[str]): List of texts to embed
-            
+
         Returns:
             List[List[float]]: List of embeddings
         """
         if self.encoder is None:
             # Fallback: return empty embeddings
             return [[] for _ in texts]
-        
+
         try:
             embeddings = self.encoder.encode(texts)
             # Convert to list of lists format
             return [embedding.tolist() for embedding in embeddings]
         except Exception as e:
-            print(f"Error creating embeddings: {e}")
+            logger = get_logger(__name__)
+            logger.error("Error creating embeddings", error=str(e))
             # Return empty embeddings in case of error
             return [[] for _ in texts]
     
-    def index_document(self, 
-                      doc_id: str, 
-                      text: str, 
+    def index_document(self,
+                      doc_id: str,
+                      text: str,
                       doc_type: str = "unknown",
                       metadata: Optional[Dict] = None) -> bool:
         """
         Index a document in the vector database.
-        
+
         Args:
             doc_id (str): Unique identifier for the document
             text (str): Text content of the document
             doc_type (str): Type of document (for metadata)
             metadata (Dict, optional): Additional metadata for the document
-            
+
         Returns:
             bool: True if successful, False otherwise
         """
+        logger = get_logger(__name__).bind(doc_id=doc_id, doc_type=doc_type)
+
         if self.chroma_client is None:
-            print("ChromaDB client not initialized")
+            logger.error("ChromaDB client not initialized")
             return False
-        
+
         try:
             # Set up default metadata
             if metadata is None:
                 metadata = {}
-            
+
             # Add document type to metadata
             metadata['doc_type'] = doc_type
             metadata['doc_id'] = doc_id
-            
+
             # Chunk the text
             chunks = self.chunk_text(text)
-            print(f"Document {doc_id} split into {len(chunks)} chunks")
-            
+            logger.info("Document split into chunks", chunk_count=len(chunks))
+
             if not chunks:
-                print(f"No chunks created for document {doc_id}")
+                logger.warning("No chunks created for document")
                 return False
-            
+
             # Create embeddings for the chunks
             embeddings = self.create_embeddings(chunks)
-            print(f"Created embeddings for {len(chunks)} chunks")
-            
+            logger.info("Created embeddings", embedding_count=len(chunks))
+
             # Create a unique collection for this document
             collection_name = f"docs_{doc_id.replace('-', '_')}"
-            
+
             # Get or create the collection
             collection = self.chroma_client.get_or_create_collection(
                 name=collection_name,
                 metadata={"hnsw:space": "cosine"}  # Use cosine similarity
             )
-            
+
             # Prepare IDs, documents, embeddings, and metadata for storage
             ids = [f"{doc_id}_chunk_{i}" for i in range(len(chunks))]
             documents = chunks
             metadatas = [metadata.copy() for _ in chunks]
-            
+
             # Add the chunks to the collection
             collection.add(
                 ids=ids,
@@ -168,12 +184,12 @@ class RAGPipeline:
                 documents=documents,
                 metadatas=metadatas
             )
-            
-            print(f"Successfully indexed document {doc_id} with {len(chunks)} chunks in collection {collection_name}")
+
+            logger.info("Document indexed successfully", collection=collection_name, chunks=len(chunks))
             return True
-            
+
         except Exception as e:
-            print(f"Error indexing document {doc_id}: {e}")
+            logger.error("Error indexing document", error=str(e))
             return False
     
     def query_document(self,
@@ -191,8 +207,10 @@ class RAGPipeline:
         Returns:
             List[Dict]: List of matching chunks with metadata
         """
+        logger = get_logger(__name__).bind(doc_id=doc_id, query=query)
+
         if self.chroma_client is None:
-            print("ChromaDB client not initialized")
+            logger.error("ChromaDB client not initialized")
             return []
 
         try:
@@ -228,7 +246,7 @@ class RAGPipeline:
             return formatted_results
 
         except Exception as e:
-            print(f"Error querying document {doc_id}: {e}")
+            logger.error("Error querying document", error=str(e))
             return []
 
     def generate_response_with_rag(self,
@@ -265,35 +283,40 @@ class RAGPipeline:
             # Use the Gemini API to generate a response based on the context
             try:
                 import google.generativeai as genai
-                import os
-
-                # Get the API key from environment variable
-                api_key = os.getenv('GEMINI_API_KEY')
-                if not api_key:
-                    # If no API key is available, return the context as before
+                
+                # Get the API key from centralized settings
+                if settings.gemini_api_key is None:
                     return f"Based on the document:\n\n{context}"
 
                 # Configure the API key
-                genai.configure(api_key=api_key)
+                genai.configure(api_key=settings.gemini_api_key.get_secret_value())
 
                 # Select the model
                 model = genai.GenerativeModel('gemini-pro')
 
-                # Create the RAG prompt template
-                rag_prompt = f"""
-                Answer the question based on the provided context from a document.
-                If the answer is not in the context, say "I don't have enough information to answer that question."
+                # Use the prompt manager to get the RAG query prompt
+                from prompts.prompt_manager import render_rag_query_prompt
+                rag_prompt = render_rag_query_prompt(context=context, query=query)
 
-                Context:
-                {context}
+                if not rag_prompt:
+                    # Fallback to default prompt if template rendering fails
+                    rag_prompt = f"""
+                    Answer the question based on the provided context from a document.
+                    If the answer is not in the context, say "I don't have enough information to answer that question."
 
-                Question: {query}
+                    Context:
+                    {context}
 
-                Answer:
-                """
+                    Question: {query}
+
+                    Answer:
+                    """
 
                 # Generate the content
-                response = model.generate_content(rag_prompt)
+                response = model.generate_content(
+                    rag_prompt,
+                    request_options={"timeout": 60}
+                )
 
                 # Return the text part of the response
                 if response.text:
@@ -303,7 +326,8 @@ class RAGPipeline:
                     return f"Based on the document:\n\n{context}"
 
             except Exception as e:
-                print(f"Error using Gemini API: {e}")
+                logger = get_logger(__name__)
+                logger.error("Error using Gemini API", error=str(e))
                 # Fallback to returning the context if there's an error
                 return f"Based on the document:\n\n{context}"
         else:
@@ -362,15 +386,46 @@ def generate_response_with_rag(doc_id: str, query: str, n_results: int = 3) -> s
     return rag_pipeline.generate_response_with_rag(doc_id, query, n_results, use_llm=True)
 
 
+def delete_document_from_chromadb(doc_id: str) -> bool:
+    """
+    Delete a document's collection from ChromaDB.
+
+    Args:
+        doc_id (str): ID of the document to delete
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    logger = get_logger(__name__).bind(doc_id=doc_id)
+
+    if rag_pipeline.chroma_client is None:
+        logger.error("ChromaDB client not initialized")
+        return False
+
+    try:
+        # Create the collection name based on the document ID
+        collection_name = f"docs_{doc_id.replace('-', '_')}"
+
+        # Delete the collection
+        rag_pipeline.chroma_client.delete_collection(collection_name)
+        logger.info("Successfully deleted collection", collection=collection_name)
+        return True
+
+    except Exception as e:
+        logger.error("Error deleting collection", error=str(e))
+        return False
+
+
 if __name__ == "__main__":
     # Example usage
+    logger = get_logger(__name__)
     sample_text = "This is a sample document for testing the RAG pipeline. " * 10
     success = index_document("test-doc-123", sample_text, "test")
     if success:
-        print("Document indexed successfully")
+        logger.info("Document indexed successfully")
 
         # Query the document
         results = query_document("test-doc-123", "sample document", n_results=2)
-        print(f"Query results: {results}")
+        logger.info("Query results", results=results)
     else:
-        print("Failed to index document")
+        logger.error("Failed to index document")
