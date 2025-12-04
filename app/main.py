@@ -1,5 +1,6 @@
 import os
 import uuid
+from typing import Dict, Any, Optional
 from fastapi import FastAPI, UploadFile, File
 import time
 
@@ -33,15 +34,36 @@ app = FastAPI(title="FinDocAI", version="1.0.0", description="Intelligent Financ
 Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
 @app.get("/")
-async def root():
+async def root() -> Dict[str, str]:
+    """
+    Root endpoint that returns a welcome message and running status.
+
+    Returns:
+        Dict[str, str]: Welcome message and status
+    """
     return {"message": "Welcome to FinDocAI - Intelligent Financial Document Processing API", "status": "running"}
 
 @app.get("/health")
-async def health_check():
+async def health_check() -> Dict[str, Any]:
+    """
+    Health check endpoint to verify the service is running.
+
+    Returns:
+        Dict[str, Any]: Health status and timestamp
+    """
     return {"status": "healthy", "timestamp": int(time.time())}
 
 @app.post("/upload")
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(file: UploadFile = File(...)) -> Dict[str, Any]:
+    """
+    Upload a document for processing.
+
+    Args:
+        file: The document file to upload
+
+    Returns:
+        Dict[str, Any]: Document ID, file info, and processing status
+    """
     # Generate a unique document ID
     doc_id = str(uuid.uuid4())
 
@@ -84,8 +106,16 @@ async def upload_document(file: UploadFile = File(...)):
     }
 
 @app.get("/status/{doc_id}")
-async def get_document_status_endpoint(doc_id: str):
-    """Get the status of a document by its ID."""
+async def get_document_status_endpoint(doc_id: str) -> Dict[str, Any]:
+    """
+    Get the status of a document by its ID.
+
+    Args:
+        doc_id: The unique identifier of the document
+
+    Returns:
+        Dict[str, Any]: Document status information or error
+    """
     document_info = get_document_status(doc_id)
 
     if document_info is None:
@@ -100,8 +130,17 @@ async def get_document_status_endpoint(doc_id: str):
     }
 
 @app.get("/query")
-async def query_document_endpoint(doc_id: str, question: str):
-    """Query a document and get an answer based on its content."""
+async def query_document_endpoint(doc_id: str, question: str) -> Dict[str, Any]:
+    """
+    Query a document and get an answer based on its content.
+
+    Args:
+        doc_id: The unique identifier of the document to query
+        question: The question to ask about the document
+
+    Returns:
+        Dict[str, Any]: The answer to the question or error
+    """
     # Verify that the document exists in our system
     document_info = get_document_status(doc_id)
 
@@ -119,8 +158,16 @@ async def query_document_endpoint(doc_id: str, question: str):
     }
 
 @app.get("/summary/{doc_id}")
-async def get_document_summary_endpoint(doc_id: str):
-    """Get the summary of a document."""
+async def get_document_summary_endpoint(doc_id: str) -> Dict[str, Any]:
+    """
+    Get the summary of a document.
+
+    Args:
+        doc_id: The unique identifier of the document to get summary for
+
+    Returns:
+        Dict[str, Any]: Document summary or error
+    """
     # Verify that the document exists in our system
     document_info = get_document_status(doc_id)
 

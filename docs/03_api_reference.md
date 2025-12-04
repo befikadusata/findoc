@@ -17,12 +17,15 @@ curl -X POST http://localhost:8000/upload \
 
 **Response:**
 
-A successful request immediately returns a JSON object with the document's unique ID and its initial status.
+A successful request immediately returns a JSON object with the document's unique ID, filename, file path, and task ID.
 
 ```json
 {
   "doc_id": "a3f2c1b0-f5a8-4c3e-b4de-1ad6b1b7c8d0",
-  "status": "processing"
+  "filename": "invoice.pdf",
+  "file_path": "./data/uploads/a3f2c1b0-f5a8-4c3e-b4de-1ad6b1b7c8d0_invoice.pdf",
+  "task_id": "task-abc123def456",
+  "message": "Document uploaded successfully and processing started"
 }
 ```
 
@@ -38,22 +41,27 @@ curl http://localhost:8000/status/a3f2c1b0-f5a8-4c3e-b4de-1ad6b1b7c8d0
 
 **Response:**
 
-Once processing is complete, the response contains the document's status, type, and the extracted entities.
+The response contains the document's metadata and status.
 
 ```json
 {
   "doc_id": "a3f2c1b0-f5a8-4c3e-b4de-1ad6b1b7c8d0",
+  "filename": "invoice.pdf",
   "status": "completed",
-  "doc_type": "invoice",
-  "processed_at": "2025-12-02T10:30:00Z",
-  "entities": {
-    "amount": 1250.00,
-    "currency": "USD",
-    "date": "2025-11-15",
-    "parties": ["ABC Corp", "XYZ Supplier"],
-    "account_number": null,
-    "terms": "Net 30"
-  }
+  "created_at": "2025-12-03 10:30:00",
+  "updated_at": "2025-12-03 10:35:00"
+}
+```
+
+**Error Response:**
+
+If the document is not found, an error response is returned.
+
+```json
+{
+  "error": "Document not found",
+  "doc_id": "nonexistent-id"
+}
 }
 ```
 
@@ -63,22 +71,32 @@ Ask a natural language question about a specific document using the RAG pipeline
 
 **Request:**
 
-The request requires the `doc_id` and the question `q` as query parameters.
+The request requires the `doc_id` and the question as query parameters.
 
 ```bash
-curl "http://localhost:8000/query?doc_id=a3f2c1b0-f5a8-4c3e-b4de-1ad6b1b7c8d0&q=What%20is%20the%20total%20amount?"
+curl "http://localhost:8000/query?doc_id=a3f2c1b0-f5a8-4c3e-b4de-1ad6b1b7c8d0&question=What%20is%20the%20total%20amount?"
 ```
 
 **Response:**
 
-The API returns the question, the LLM-generated answer, a confidence score, and the sources (document chunks) used to generate the answer.
+The API returns the document ID, question, and LLM-generated answer.
 
 ```json
 {
+  "doc_id": "a3f2c1b0-f5a8-4c3e-b4de-1ad6b1b7c8d0",
   "question": "What is the total amount?",
-  "answer": "The total amount is $1,250.00 USD.",
-  "confidence": 0.94,
-  "sources": ["chunk_0", "chunk_3"]
+  "answer": "The total amount is $1,250.00 USD."
+}
+```
+
+**Error Response:**
+
+If the document is not found, an error response is returned.
+
+```json
+{
+  "error": "Document not found",
+  "doc_id": "nonexistent-id"
 }
 ```
 
@@ -97,11 +115,39 @@ curl http://localhost:8000/summary/a3f2c1b0-f5a8-4c3e-b4de-1ad6b1b7c8d0
 ```json
 {
   "doc_id": "a3f2c1b0-f5a8-4c3e-b4de-1ad6b1b7c8d0",
-  "summary": "This is an invoice from XYZ Supplier to ABC Corp for the amount of $1,250, dated November 15, 2025. The services provided include consulting and software licenses, with payment terms of Net 30.",
-  "key_points": [
-    "Total Amount: $1,250.00",
-    "Due Date: December 15, 2025",
-    "Vendor: XYZ Supplier"
-  ]
+  "summary": {
+    "summary": "This is an invoice from XYZ Supplier to ABC Corp for the amount of $1,250, dated November 15, 2025...",
+    "key_points": [
+      "Total Amount: $1,250.00",
+      "Due Date: December 15, 2025",
+      "Vendor: XYZ Supplier"
+    ],
+    "document_type": "invoice",
+    "document_date": "2025-11-15",
+    "extracted_entities": {
+      "invoice_number": "INV-12345",
+      "total_amount": 1250.0
+    }
+  }
+}
+```
+
+**Error Response:**
+
+If the document is not found, an error response is returned.
+
+```json
+{
+  "error": "Document not found",
+  "doc_id": "nonexistent-id"
+}
+```
+
+**Or if summary is not available:**
+
+```json
+{
+  "error": "Summary not available",
+  "doc_id": "unprocessed-document-id"
 }
 ```
