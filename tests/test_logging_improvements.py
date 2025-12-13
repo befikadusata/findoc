@@ -1,86 +1,41 @@
-"""
-Test script for logging improvements
-This script tests that the print statements have been replaced with structured logging.
-"""
+import pytest
+from unittest.mock import patch, MagicMock
+from app.utils.logging_config import get_logger
+from app.rag.pipeline import RAGPipeline
+from app.nlp.extraction import extract_entities, generate_summary
+from app.classification.model import classify_document
 
-import sys
-import os
-sys.path.insert(0, os.path.abspath('.'))
+logger = get_logger(__name__)
 
 def test_logging_imports():
     """Test that all modules can be imported without errors."""
-    print("Testing imports after logging improvements...")
+    logger.info("Testing imports after logging improvements...")
     
-    try:
-        from app.utils.logging_config import get_logger
-        print("✓ Logging config imported successfully")
-    except ImportError as e:
-        print(f"✗ Failed to import logging config: {e}")
-        return False
+    # These imports are now at the top of the file, so this test just asserts their presence
+    assert get_logger is not None
+    logger.info("Logging config imported successfully")
     
-    try:
-        from app.rag.pipeline import RAGPipeline
-        print("✓ RAG pipeline imported successfully")
-    except ImportError as e:
-        print(f"✗ Failed to import RAG pipeline: {e}")
-        return False
+    assert RAGPipeline is not None
+    logger.info("RAG pipeline imported successfully")
     
-    try:
-        from app.nlp.extraction import extract_entities, generate_summary
-        print("✓ NLP extraction imported successfully")
-    except ImportError as e:
-        print(f"✗ Failed to import NLP extraction: {e}")
-        return False
+    assert extract_entities is not None and generate_summary is not None
+    logger.info("NLP extraction imported successfully")
     
-    try:
-        from app.classification.model import classify_document
-        print("✓ Classification model imported successfully")
-    except ImportError as e:
-        print(f"✗ Failed to import classification model: {e}")
-        return False
-    
-    return True
+    assert classify_document is not None
+    logger.info("Classification model imported successfully")
 
 
 def test_logger_functionality():
     """Test that logging functionality works properly."""
-    print("Testing logger functionality...")
+    logger.info("Testing logger functionality...")
     
+    # To properly test, we need to capture log output, which is complex with structlog.
+    # For simplicity, we'll just ensure the logger can be instantiated and called without error.
     try:
-        from app.utils.logging_config import get_logger
-        logger = get_logger(__name__)
-        
-        # Test logging with context binding
-        bound_logger = logger.bind(test_id="test-log-123")
-        bound_logger.info("Test log message", value=42)
-        print("✓ Logger functionality works correctly")
-        
-        return True
+        test_logger = get_logger("test.module")
+        test_logger.info("Test log message from test_logger_functionality", value=123)
+        test_logger.warning("Test warning message", extra_data="test_event_context")
+        test_logger.error("Test error message", error_code=500)
+        logger.info("Logger functionality works correctly (calls made without error).")
     except Exception as e:
-        print(f"✗ Error testing logger functionality: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-
-def main():
-    """Run all tests."""
-    print("Starting tests for logging improvements...\n")
-    
-    test_results = []
-    test_results.append(test_logging_imports())
-    test_results.append(test_logger_functionality())
-    
-    print(f"\nTest Results: {sum(test_results)}/{len(test_results)} passed")
-    
-    if all(test_results):
-        print("\n🎉 All tests passed! Logging improvements implemented successfully.")
-        return True
-    else:
-        print("\n❌ Some tests failed.")
-        return False
-
-
-if __name__ == "__main__":
-    success = main()
-    sys.exit(0 if success else 1)
+        pytest.fail(f"Logger functionality test failed: {e}")

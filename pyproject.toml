@@ -1,0 +1,60 @@
+[tool.poetry]
+package-mode = false
+name = "findoc"
+version = "0.1.0"
+description = ""
+authors = ["befikadusata <befikadusata@gmail.com>"]
+readme = "README.md"
+
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[[tool.poetry.source]]
+name = "torch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"
+
+
+[tool.poetry.dependencies]
+python = ">=3.13"
+torch = {version = ">=2.9.1", source = "torch-cpu"}
+fastapi = "*"
+uvicorn = {version = "*", extras = ["standard"]}
+celery = "*"
+redis = "*"
+pytesseract = "*"
+pdf2image = "*"
+pypdf = "*"
+transformers = "*"
+sentence-transformers = "*"
+chromadb = "*"
+google-generativeai = "*"
+structlog = "*"
+prometheus-fastapi-instrumentator = "*"
+prometheus-client = "*"
+pytest = "*"
+pydantic = "*"
+langchain = {version = "*", python = ">=3.13,<4.0.0"}
+locust = "*"
+psycopg2-binary = "*"
+sqlalchemy = "*"
+alembic = "*"
+jinja2 = "*"
+mlflow = "*"
+shap = "*"
+captum = "*"
+passlib = {version = "*", extras = ["bcrypt"]}
+python-jose = {version = "*", extras = ["cryptography"]}
+python-multipart = "*"
+pyarrow = "22.0.0"
+pydantic-settings = "*"
+email-validator = "*"
+langchain-text-splitters = "*"
+werkzeug = "^3.1.4"
+
+[tool.pytest.ini_options]
+pythonpath = "."
+

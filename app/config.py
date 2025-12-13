@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     # Gemini API Configuration
     gemini_api_key: Optional[SecretStr] = Field(None, env="GEMINI_API_KEY") # Optional for local development/testing
 
+    # JWT Secret Key for token signing
+    jwt_secret_key: SecretStr = Field(default="a_very_secret_key_for_development", env="JWT_SECRET_KEY")
+
     # Authentication Configuration
     require_auth: bool = Field(default=True, env="REQUIRE_AUTH")  # Whether to require authentication
 

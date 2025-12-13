@@ -84,7 +84,8 @@ def extract_entities(text: str, doc_type: str = "financial") -> Dict[str, Any]:
         if settings.gemini_api_key is None:
             return {"error": "GEMINI_API_KEY is not set in configuration"}
         
-        genai.configure(api_key=settings.gemini_api_key.get_secret_value())
+        gemini_api_key_value = settings.gemini_api_key.get_secret_value()
+        genai.configure(api_key=gemini_api_key_value)
         
         # Select the model
         model = genai.GenerativeModel('gemini-pro')
@@ -183,7 +184,8 @@ def generate_summary(text: str, doc_type: str = "financial", max_length: int = 3
         if settings.gemini_api_key is None:
             return {"error": "GEMINI_API_KEY is not set in configuration"}
         
-        genai.configure(api_key=settings.gemini_api_key.get_secret_value())
+        gemini_api_key_value = settings.gemini_api_key.get_secret_value()
+        genai.configure(api_key=gemini_api_key_value)
         
         # Select the model
         model = genai.GenerativeModel('gemini-pro')

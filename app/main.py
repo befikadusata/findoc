@@ -1,449 +1,250 @@
 import os
 import uuid
-from typing import Dict, Any, Optional
-from fastapi import FastAPI, UploadFile, File, Depends
-import time
+from typing import Dict, Any
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, status
 
-# For Celery integration, we'll call the task by name to avoid import issues
+# For Celery integration
 from celery import Celery
 
-# Import authentication
+# Import authentication and database modules
 from app.auth import get_current_user
-from app.config import settings
-
-# Import the database module
-from app.database_factory import database
+from app.database import get_db, Session
+from app.models import User, Document
+from app.api.endpoints import auth as auth_endpoints
 
 # Import API schemas for input validation
-from app.api.schemas.request_models import DocumentIdRequest, QueryRequest, DeleteDocumentRequest, SummaryRequest
+from app.api.schemas.request_models import QueryRequest
 
 # Import prometheus instrumentation
 from prometheus_fastapi_instrumentator import Instrumentator
 
-# Import structured logging
+# Import structured logging and settings
 from app.utils.logging_config import get_logger
-logger = get_logger(__name__)
-
-# Import centralized settings
 from app.config import settings
+
+from app.utils.file_utils import sanitize_filename
+
+logger = get_logger(__name__)
 
 # Import MLflow
 import mlflow
 mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
 
-# Create a Celery instance for calling tasks
-celery_app = Celery('findocai', broker=settings.redis_url)
-
-app = FastAPI(title="FinDocAI", version="1.0.0", description="Intelligent Financial Document Processing API")
-
-# Instrument the app with Prometheus metrics
-Instrumentator().instrument(app).expose(app, endpoint="/metrics")
-
-@app.get("/")
-async def root() -> Dict[str, str]:
-    """
-    Root endpoint that returns a welcome message and running status.
-
-    Returns:
-        Dict[str, str]: Welcome message and status
-    """
-    return {"message": "Welcome to FinDocAI - Intelligent Financial Document Processing API", "status": "running"}
-
-@app.get("/health")
-async def health_check() -> Dict[str, Any]:
-    """
-    Health check endpoint to verify the service is running.
-
-    Returns:
-        Dict[str, Any]: Health status and timestamp
-    """
-    return {"status": "healthy", "timestamp": int(time.time())}
-
-# Authentication dependency - conditionally applied based on settings
-if settings.require_auth:
-    from app.auth import get_current_user
-    auth_dependency = Depends(get_current_user)
+# Initialize Celery only if Redis URL is configured
+celery_app = None
+if settings.redis_url:
+    celery_app = Celery('findocai', broker=settings.redis_url)
 else:
-    # Create a dummy dependency that always passes
-    async def no_auth():
-        return {"api_key_valid": True, "user_id": "anonymous"}
-    auth_dependency = Depends(no_auth)
+    logger.warning("REDIS_URL not configured, Celery will not be initialized.")
 
-@app.post("/upload")
-async def upload_document(file: UploadFile = File(...), current_user: dict = auth_dependency) -> Dict[str, Any]:
+def create_app() -> FastAPI:
     """
-    Upload a document for processing.
-
-    Args:
-        file: The document file to upload
-        current_user: Authenticated user (if authentication is enabled)
-
-    Returns:
-        Dict[str, Any]: Document ID, file info, and processing status
+    Factory function to create and configure the FastAPI application.
+    This prevents the app from being initialized during pytest collection
+    and allows for flexible testing configurations.
     """
-    # Generate a unique document ID
-    doc_id = str(uuid.uuid4())
+    app = FastAPI(title="FinDocAI", version="1.0.0", description="Intelligent Financial Document Processing API")
 
-    # Add document ID to logger context
-    upload_logger = logger.bind(doc_id=doc_id, filename=file.filename)
+    # Include the authentication router
+    app.include_router(auth_endpoints.router, prefix="/auth", tags=["Authentication"])
 
-    # Log the upload to MLflow
-    with mlflow.start_run(run_name=f"document_upload_{doc_id}"):
-        mlflow.log_param("document_id", doc_id)
-        mlflow.log_param("filename", file.filename)
-        mlflow.log_param("content_type", file.content_type)
+    # Instrument the app with Prometheus metrics
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
-        # Create the uploads directory if it doesn't exist
-        upload_dir = "./data/uploads"
-        os.makedirs(upload_dir, exist_ok=True)
+    @app.get("/")
+    async def root() -> Dict[str, str]:
+        """Root endpoint that returns a welcome message."""
+        return {"message": "Welcome to FinDocAI - Intelligent Financial Document Processing API", "status": "running"}
 
-        # Create the file path with the unique document ID
-        file_path = os.path.join(upload_dir, f"{doc_id}_{file.filename}")
+    @app.get("/health")
+    async def health_check() -> Dict[str, Any]:
+        """Health check endpoint to verify the service is running."""
+        import time
+        return {"status": "healthy", "timestamp": int(time.time())}
 
-        # Read file content
-        file_content = await file.read()
-        mlflow.log_param("file_size", len(file_content))
+    @app.post("/upload", status_code=status.HTTP_201_CREATED)
+    async def upload_document(
+        file: UploadFile = File(...), 
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+    ) -> Dict[str, Any]:
+        """
+        Upload a document for processing and associate it with the current user.
+        """
+        doc_id = str(uuid.uuid4())
+        upload_logger = logger.bind(doc_id=doc_id, filename=file.filename, username=current_user.username)
+        sanitized_filename = sanitize_filename(file.filename)
 
-        # Save the uploaded file
-        with open(file_path, "wb") as buffer:
-            buffer.write(file_content)
+        with mlflow.start_run(run_name=f"document_upload_{doc_id}"):
+            mlflow.log_param("document_id", doc_id)
+            mlflow.log_param("filename", sanitized_filename)
+            mlflow.log_param("user_id", current_user.id)
 
-        # Log the file as an artifact
-        mlflow.log_artifact(file_path, "uploaded_files")
+            upload_dir = "./data/uploads"
+            os.makedirs(upload_dir, exist_ok=True)
+            file_path = os.path.join(upload_dir, f"{doc_id}_{sanitized_filename}")
 
-        # Create a record in the database with 'uploaded' status
-        if not database.create_document_record(doc_id, file.filename):
-            upload_logger.error("Failed to create document record in database")
-            return {
-                "doc_id": doc_id,
-                "filename": file.filename,
-                "error": "Failed to register document in system"
-            }
+            file_content = 0 # Temporarily set to 0. It will be the actual size from the streaming
+            total_bytes_written = 0
+            with open(file_path, "wb") as buffer:
+                while chunk := await file.read(8192):  # Read in 8KB chunks
+                    buffer.write(chunk)
+                    total_bytes_written += len(chunk)
+            mlflow.log_param("file_size", total_bytes_written)
 
-        # Update the document status to 'queued' before starting processing
-        if not database.update_document_status(doc_id, 'queued'):
-            upload_logger.error("Failed to update document status in database")
-            return {
-                "doc_id": doc_id,
-                "filename": file.filename,
-                "error": "Failed to update document status"
-            }
+            mlflow.log_artifact(file_path, "uploaded_files")
 
-        upload_logger.info("Document saved, status updated, and MLflow artifact logged")
+            # Create document record and associate with user
+            new_document = Document(
+                doc_id=doc_id,
+                filename=sanitized_filename,
+                status='queued',
+                user_id=current_user.id
+            )
+            db.add(new_document)
+            db.commit()
+            db.refresh(new_document)
+            
+            upload_logger.info("Document saved and associated with user")
 
-        # Trigger the document processing task asynchronously
-        # This will be executed by a Celery worker
-        task = celery_app.send_task('process_document', args=[doc_id, file_path])
+            if celery_app:
+                task = celery_app.send_task('process_document', args=[doc_id, file_path])
+                upload_logger.info("Processing task queued", task_id=task.id)
+            else:
+                upload_logger.warning("Celery app not initialized, document not queued for processing.")
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Celery not configured")
 
-    upload_logger.info("Processing task queued", task_id=task.id)
-
-    return {
-        "doc_id": doc_id,
-        "filename": file.filename,
-        "file_path": file_path,
-        "task_id": task.id,
-        "message": "Document uploaded successfully and processing started"
-    }
-
-@app.get("/status/{doc_id}")
-async def get_document_status_endpoint(doc_id: str, current_user: dict = auth_dependency) -> Dict[str, Any]:
-    """
-    Get the status of a document by its ID.
-
-    Args:
-        doc_id: The unique identifier of the document
-        current_user: Authenticated user (if authentication is enabled)
-
-    Returns:
-        Dict[str, Any]: Document status information or error
-    """
-    # Validate doc_id format
-    try:
-        DocumentIdRequest(doc_id=doc_id)
-    except Exception as e:
-        logger.error("Invalid document ID format", doc_id=doc_id, error=str(e))
-        return {"error": "Invalid document ID format", "doc_id": doc_id}
-
-    document_info = database.get_document_status(doc_id)
-
-    if document_info is None:
-        logger.warning("Document not found", doc_id=doc_id)
-        return {"error": "Document not found", "doc_id": doc_id}
-
-    return {
-        "doc_id": document_info["doc_id"],
-        "filename": document_info["filename"],
-        "status": document_info["status"],
-        "created_at": document_info["created_at"],
-        "updated_at": document_info["updated_at"]
-    }
-
-@app.get("/query")
-async def query_document_endpoint(doc_id: str, question: str, explain: bool = False, current_user: dict = auth_dependency) -> Dict[str, Any]:
-    """
-    Query a document and get an answer based on its content.
-
-    Args:
-        doc_id: The unique identifier of the document to query
-        question: The question to ask about the document
-        explain: Whether to include explanation data (confidence scores, source attribution)
-        current_user: Authenticated user (if authentication is enabled)
-
-    Returns:
-        Dict[str, Any]: The answer to the question or error, with optional explanation data
-    """
-    # Validate input parameters
-    try:
-        QueryRequest(doc_id=doc_id, question=question)
-    except Exception as e:
-        logger.error("Invalid query parameters", doc_id=doc_id, question=question, error=str(e))
-        return {"error": f"Invalid input parameters: {str(e)}", "doc_id": doc_id}
-
-    # Verify that the document exists in our system
-    document_info = database.get_document_status(doc_id)
-
-    if document_info is None:
-        logger.warning("Document not found for query", doc_id=doc_id, question=question)
-        return {"error": "Document not found", "doc_id": doc_id}
-
-    # Use the RAG pipeline to generate a response and log to MLflow
-    with mlflow.start_run(run_name=f"document_query_{doc_id}"):
-        mlflow.log_param("document_id", doc_id)
-        mlflow.log_param("question", question)
-        mlflow.log_param("query_timestamp", int(time.time()))
-        mlflow.log_param("include_explanation", explain)
-
-        from app.rag.pipeline import generate_response_with_rag
-        result = generate_response_with_rag(doc_id, question, include_explanation=explain)
-
-        # Log metrics based on result format
-        if explain and isinstance(result, dict):
-            answer = result.get("response", "")
-            mlflow.log_metric("answer_length", len(answer) if answer else 0)
-            mlflow.log_metric("confidence_score", result.get("explanation", {}).get("confidence", 0.0))
-        else:
-            answer_text = result if isinstance(result, str) else result.get("response", "")
-            mlflow.log_metric("answer_length", len(answer_text) if answer_text else 0)
-
-    if explain and isinstance(result, dict):
-        # Return the full result with explanations
         return {
             "doc_id": doc_id,
-            "question": question,
-            "answer": result.get("response", ""),
-            "explanation": result.get("explanation", {}),
-            "retrieved_chunks": result.get("retrieved_chunks", [])
+            "filename": sanitized_filename,
+            "message": "Document uploaded successfully and processing has started."
         }
-    else:
-        # Return just the answer for backward compatibility
-        answer_text = result if isinstance(result, str) else result.get("response", "")
+
+
+    @app.get("/status/{doc_id}")
+    async def get_document_status_endpoint(
+        doc_id: str, 
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+    ) -> Dict[str, Any]:
+        """
+        Get the status of a document, ensuring ownership.
+        """
+        doc = db.query(Document).filter(Document.doc_id == doc_id).first()
+
+        if not doc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        
+        if doc.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to access this document")
+
         return {
-            "doc_id": doc_id,
-            "question": question,
-            "answer": answer_text
+            "doc_id": doc.doc_id,
+            "filename": doc.filename,
+            "status": doc.status,
+            "created_at": doc.created_at,
+            "updated_at": doc.updated_at
         }
 
-@app.get("/summary/{doc_id}")
-async def get_document_summary_endpoint(doc_id: str, current_user: dict = auth_dependency) -> Dict[str, Any]:
-    """
-    Get the summary of a document.
 
-    Args:
-        doc_id: The unique identifier of the document to get summary for
-        current_user: Authenticated user (if authentication is enabled)
+    @app.post("/query")
+    async def query_document_endpoint(
+        request: QueryRequest,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+    ) -> Dict[str, Any]:
+        """
+        Query a document and get an answer, ensuring ownership.
+        """
+        doc = db.query(Document).filter(Document.doc_id == request.doc_id).first()
 
-    Returns:
-        Dict[str, Any]: Document summary or error
-    """
-    # Validate doc_id format
-    try:
-        SummaryRequest(doc_id=doc_id)
-    except Exception as e:
-        logger.error("Invalid document ID format for summary", doc_id=doc_id, error=str(e))
-        return {"error": "Invalid document ID format", "doc_id": doc_id}
+        if not doc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        
+        if doc.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to query this document")
 
-    # Verify that the document exists in our system
-    document_info = database.get_document_status(doc_id)
+        with mlflow.start_run(run_name=f"document_query_{request.doc_id}"):
+            mlflow.log_param("document_id", request.doc_id)
+            mlflow.log_param("question", request.question)
 
-    if document_info is None:
-        logger.warning("Document not found for summary", doc_id=doc_id)
-        return {"error": "Document not found", "doc_id": doc_id}
+            from app.rag.pipeline import generate_response_with_rag
+            result = generate_response_with_rag(request.doc_id, request.question)
 
-    # Get the summary from the database
-    summary = database.get_document_summary(doc_id)
+            mlflow.log_metric("answer_length", len(result.get("response", "")))
 
-    if summary is None:
-        logger.warning("Summary not available", doc_id=doc_id)
-        return {"error": "Summary not available", "doc_id": doc_id}
-
-    return {
-        "doc_id": doc_id,
-        "summary": summary
-    }
-
-
-@app.get("/explain/classification/{doc_id}")
-async def get_classification_explanation(doc_id: str, current_user: dict = auth_dependency) -> Dict[str, Any]:
-    """
-    Get the classification explanation for a document if available.
-
-    Args:
-        doc_id: The unique identifier of the document to get explanation for
-        current_user: Authenticated user (if authentication is enabled)
-
-    Returns:
-        Dict[str, Any]: Classification explanation or error
-    """
-    # Validate doc_id format
-    try:
-        DocumentIdRequest(doc_id=doc_id)
-    except Exception as e:
-        logger.error("Invalid document ID format for explanation", doc_id=doc_id, error=str(e))
-        return {"error": "Invalid document ID format", "doc_id": doc_id}
-
-    # Verify that the document exists in our system
-    document_info = database.get_document_status(doc_id)
-
-    if document_info is None:
-        logger.warning("Document not found for explanation", doc_id=doc_id)
-        return {"error": "Document not found", "doc_id": doc_id}
-
-    # Retrieve document entities which may contain classification explanation
-    entities = database.get_document_entities(doc_id)
-
-    # We need to extract classification explanation from the document processing information
-    # For now, we'll provide a way to classify fresh with explanation
-    from app.classification.model import classifier
-
-    # Get the document text from storage (this would require reading the file back)
-    # Since we don't have a function to retrieve the original text, we'll return information
-    # about what we know about the classification if it's available in the document status
-    doc_type = document_info.get('status', '').replace('classified_as_', '') if 'classified_as_' in document_info.get('status', '') else 'unknown'
-
-    return {
-        "doc_id": doc_id,
-        "classification_info": {
-            "predicted_type": doc_type,
-            "status": document_info.get('status'),
-            "created_at": document_info.get('created_at'),
-            "updated_at": document_info.get('updated_at')
-        },
-        "message": "Classification explanation endpoint - implementation would require access to original text for attention visualization"
-    }
-
-
-@app.delete("/documents/{doc_id}")
-async def delete_document_endpoint(doc_id: str, current_user: dict = auth_dependency) -> Dict[str, Any]:
-    """
-    Delete a document and all its associated data.
-
-    Args:
-        doc_id: The unique identifier of the document to delete
-        current_user: Authenticated user (if authentication is enabled)
-
-    Returns:
-        Dict[str, Any]: Deletion status information
-    """
-    # Validate doc_id format
-    try:
-        DeleteDocumentRequest(doc_id=doc_id)
-    except Exception as e:
-        logger.error("Invalid document ID format for deletion", doc_id=doc_id, error=str(e))
-        return {"error": "Invalid document ID format", "doc_id": doc_id}
-
-    # Verify that the document exists in our system
-    document_info = database.get_document_status(doc_id)
-
-    if document_info is None:
-        logger.warning("Document not found for deletion", doc_id=doc_id)
-        return {"error": "Document not found", "doc_id": doc_id}
-
-    # Import required functions
-    from app.rag.pipeline import delete_document_from_chromadb
-
-    # Log the deletion attempt
-    delete_logger = logger.bind(doc_id=doc_id)
-    delete_logger.info("Starting document deletion process")
-
-    try:
-        # 1. Delete from ChromaDB
-        chroma_deleted = delete_document_from_chromadb(doc_id)
-        delete_logger.info("ChromaDB collection deletion attempted", success=chroma_deleted)
-
-        # 2. Delete from PostgreSQL database
-        db_deleted = database.delete_document_record(doc_id)
-        delete_logger.info("Database record deletion attempted", success=db_deleted)
-
-        # 3. Delete the actual file from storage
-        file_deleted = delete_document_file(doc_id, document_info["filename"])
-        delete_logger.info("File system deletion attempted", success=file_deleted)
-
-        # Determine overall success
-        overall_success = chroma_deleted and db_deleted and file_deleted
-
-        if overall_success:
-            delete_logger.info("Document deletion completed successfully")
-            return {
-                "message": "Document deleted successfully",
-                "doc_id": doc_id,
-                "deleted_from": {
-                    "chromadb": chroma_deleted,
-                    "database": db_deleted,
-                    "file_system": file_deleted
-                }
-            }
-        else:
-            delete_logger.warning("Document deletion partially failed",
-                                chromadb=chroma_deleted,
-                                database=db_deleted,
-                                file_system=file_deleted)
-            return {
-                "message": "Document deletion partially completed",
-                "doc_id": doc_id,
-                "deleted_from": {
-                    "chromadb": chroma_deleted,
-                    "database": db_deleted,
-                    "file_system": file_deleted
-                }
-            }
-
-    except Exception as e:
-        delete_logger.error("Error occurred during document deletion", error=str(e))
         return {
-            "error": f"Error occurred during document deletion: {str(e)}",
-            "doc_id": doc_id
+            "doc_id": request.doc_id,
+            "question": request.question,
+            "answer": result.get("response", "")
         }
 
+    @app.get("/summary/{doc_id}")
+    async def get_document_summary_endpoint(
+        doc_id: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+    ) -> Dict[str, Any]:
+        """
+        Get the summary of a document, ensuring ownership.
+        """
+        doc = db.query(Document).filter(Document.doc_id == doc_id).first()
 
-def delete_document_file(doc_id: str, filename: str) -> bool:
-    """
-    Delete the actual document file from the file system.
+        if not doc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        
+        if doc.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to access this summary")
+            
+        if not doc.summary:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Summary not available for this document")
 
-    Args:
-        doc_id: The document ID
-        filename: The original filename
+        return {"doc_id": doc.doc_id, "summary": doc.summary}
 
-    Returns:
-        bool: True if file was successfully deleted, False otherwise
-    """
-    import os
+    @app.delete("/documents/{doc_id}", status_code=status.HTTP_200_OK)
+    async def delete_document_endpoint(
+        doc_id: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+    ) -> Dict[str, Any]:
+        """
+        Delete a document and all its associated data, ensuring ownership.
+        """
+        doc = db.query(Document).filter(Document.doc_id == doc_id).first()
 
-    file_path = os.path.join("./data/uploads", f"{doc_id}_{filename}")
+        if not doc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        
+        if doc.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to delete this document")
 
-    try:
-        if os.path.exists(file_path):
-            os.remove(file_path)
-            logger.info("Document file deleted from file system", doc_id=doc_id, file_path=file_path)
-            return True
-        else:
-            logger.warning("Document file not found in file system", doc_id=doc_id, file_path=file_path)
-            return False
-    except Exception as e:
-        logger.error("Error deleting document file from file system",
-                    doc_id=doc_id, file_path=file_path, error=str(e))
-        return False
+        delete_logger = logger.bind(doc_id=doc_id, username=current_user.username)
+        delete_logger.info("Starting document deletion process")
 
+        try:
+            from app.rag.pipeline import delete_document_from_chromadb
+            chroma_deleted = delete_document_from_chromadb(doc_id)
+            
+            db.delete(doc)
+            db.commit()
+
+            file_path = os.path.join("./data/uploads", f"{doc.doc_id}_{doc.filename}")
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+            delete_logger.info("Document deleted successfully")
+            return {"message": "Document deleted successfully", "doc_id": doc_id}
+
+        except Exception as e:
+            delete_logger.error("Error during document deletion", error=str(e))
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An error occurred: {e}")
+    
+    return app # Return the configured app instance
+
+# Global app instance will be created only when app.main is run directly
+# Otherwise, create_app() should be called explicitly (e.g., in tests)
+app = create_app()
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

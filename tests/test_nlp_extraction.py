@@ -78,10 +78,10 @@ def test_extract_entities():
 
 def test_extract_entities_api_key_missing():
     """Test entity extraction when API key is missing."""
-    with patch('os.getenv', return_value=None):  # No API key
+    with patch('app.config.settings.gemini_api_key', None):  # Mock gemini_api_key to be None
         result = extract_entities("sample text", "invoice")
         assert "error" in result
-        assert "GEMINI_API_KEY" in result["error"]
+        assert result["error"] == "GEMINI_API_KEY is not set in configuration"
 
 
 def test_extract_entities_api_error():
@@ -149,10 +149,10 @@ def test_generate_summary():
 
 def test_generate_summary_api_key_missing():
     """Test summary generation when API key is missing."""
-    with patch('os.getenv', return_value=None):  # No API key
+    with patch('app.config.settings.gemini_api_key', None):  # Mock gemini_api_key to be None
         result = generate_summary("sample text", "invoice")
         assert "error" in result
-        assert "GEMINI_API_KEY" in result["error"]
+        assert result["error"] == "GEMINI_API_KEY is not set in configuration"
 
 
 def test_generate_summary_api_error():

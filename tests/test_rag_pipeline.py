@@ -110,6 +110,7 @@ def test_query_document():
         mock_client = MagicMock()
         mock_collection = MagicMock()
         mock_result = {
+            'ids': [['id1']], # Added to simulate ChromaDB response
             'documents': [['retrieved chunk']],
             'metadatas': [[{'doc_type': 'invoice'}]],
             'distances': [[0.1]]
@@ -137,6 +138,7 @@ def test_generate_response_with_rag():
         mock_client = MagicMock()
         mock_collection = MagicMock()
         mock_result = {
+            'ids': [['id1']], # Added to simulate ChromaDB response
             'documents': [['relevant context chunk']],
             'metadatas': [[{'doc_type': 'invoice'}]],
             'distances': [[0.1]]
@@ -173,6 +175,7 @@ def test_generate_response_with_rag_fallback():
         mock_client = MagicMock()
         mock_collection = MagicMock()
         mock_result = {
+            'ids': [['id1']], # Added to simulate ChromaDB response
             'documents': [['relevant context chunk']],
             'metadatas': [[{'doc_type': 'invoice'}]],
             'distances': [[0.1]]
@@ -211,4 +214,4 @@ def test_convenience_functions():
     with patch('app.rag.pipeline.rag_pipeline.generate_response_with_rag', return_value="response") as mock_method:
         result = generate_response_with_rag("doc123", "question")
         assert result == "response"
-        mock_method.assert_called_once_with("doc123", "question", 3, use_llm=True)
+        mock_method.assert_called_once_with("doc123", "question", 3, use_llm=True, include_explanation=False)

@@ -4,9 +4,18 @@ API Schemas for Input Validation
 This module contains Pydantic models for validating API inputs.
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, EmailStr
 from typing import Optional
 import re
+
+
+class UserCreate(BaseModel):
+    """
+    Validation schema for user creation.
+    """
+    username: str = Field(..., min_length=3, max_length=50)
+    email: EmailStr
+    password: str = Field(..., min_length=8)
 
 
 class DocumentIdRequest(BaseModel):

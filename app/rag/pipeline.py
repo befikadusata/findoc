@@ -28,6 +28,8 @@ from app.config import settings
 # Import structured logging
 from app.utils.logging_config import get_logger
 
+logger = get_logger(__name__)
+
 class RAGPipeline:
     """
     RAG pipeline for document chunking, embedding, and indexing.
@@ -44,6 +46,7 @@ class RAGPipeline:
         """
         self.model_name = model_name
         self.persist_directory = persist_directory
+        self.logger = get_logger(__name__) # Initialize logger here
         
         # Ensure the persist directory exists
         Path(persist_directory).mkdir(parents=True, exist_ok=True)
@@ -52,7 +55,7 @@ class RAGPipeline:
         try:
             self.encoder = SentenceTransformer(model_name)
         except Exception as e:
-            logger.error(f"Error initializing sentence transformer: {e}")
+            self.logger.error(f"Error initializing sentence transformer: {e}")
             # Fallback initialization
             self.encoder = None
         
@@ -66,8 +69,7 @@ class RAGPipeline:
                 )
             )
         except Exception as e:
-            logger = get_logger(__name__)
-            logger.error(f"Error initializing ChromaDB client: {e}")
+            self.logger.error(f"Error initializing ChromaDB client: {e}")
             self.chroma_client = None
     
     def chunk_text(self, text: str, 
@@ -541,30 +543,7 @@ def delete_document_from_chromadb(doc_id: str) -> bool:
         return False
 
 
-def get_document_summary(doc_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Get the summary of a document from the database.
-
-    Args:
-        doc_id (str): ID of the document to query
-
-    Returns:
-        Dict with document summary or None if not found
-    """
-    from app.database_factory import database
-    return database.get_document_summary(doc_id)
 
 
-if __name__ == "__main__":
-    # Example usage
-    logger = get_logger(__name__)
-    sample_text = "This is a sample document for testing the RAG pipeline. " * 10
-    success = index_document("test-doc-123", sample_text, "test")
-    if success:
-        logger.info("Document indexed successfully")
 
-        # Query the document
-        results = query_document("test-doc-123", "sample document", n_results=2)
-        logger.info("Query results", results=results)
-    else:
-        logger.error("Failed to index document")
+
