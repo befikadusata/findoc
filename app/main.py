@@ -87,6 +87,52 @@ async def upload_document(file: UploadFile = File(...), current_user: dict = aut
     # Add document ID to logger context
     upload_logger = logger.bind(doc_id=doc_id, filename=file.filename)
 
+    upload_logger.info("Starting document upload")
+
+    # Create the uploads directory if it doesn't exist
+    upload_dir = "./data/uploads"
+    os.makedirs(upload_dir, exist_ok=True)
+
+    # Create the file path with the unique document ID
+    file_path = os.path.join(upload_dir, f"{doc_id}_{file.filename}")
+
+    try:
+        # Save the uploaded file
+        with open(file_path, "wb") as buffer:
+            buffer.write(await file.read())
+
+        # Create a record in the database with 'uploaded' status
+        if not database.create_document_record(doc_id, file.filename):
+            upload_logger.error("Failed to create document record in database")
+            return {
+                "doc_id": doc_id,
+                "filename": file.filename,
+                "error": "Failed to register document in system"
+            }
+
+        # Update the document status to 'queued' before starting processing
+        if not database.update_document_status(doc_id, 'queued'):
+            upload_logger.error("Failed to update document status in database")
+            return {
+                "doc_id": doc_id,
+                "filename": file.filename,
+                "error": "Failed to update document status"
+            }
+
+        upload_logger.info("Document saved and status updated to queued")
+
+        # Trigger the document processing task asynchronously
+        # This will be executed by a Celery worker
+        task = celery_app.send_task('process_document', args=[doc_id, file_path])
+
+        upload_logger.info("Processing task queued", task_id=task.id)
+
+    except Exception as e:
+        upload_logger.error("Error during document upload processing", error=str(e))
+        return {
+            "doc_id": doc_id,
+            "filename": file.filename,
+            "error": f"Upload processing error: {str(e)}"
     try:
         upload_logger.info("Starting document upload")
 
@@ -171,12 +217,14 @@ async def get_document_status_endpoint(doc_id: str, current_user: dict = auth_de
     # Validate doc_id format
     try:
         DocumentIdRequest(doc_id=doc_id)
-    except Exception:
+    except Exception as e:
+        logger.error("Invalid document ID format", doc_id=doc_id, error=str(e))
         return {"error": "Invalid document ID format", "doc_id": doc_id}
 
-    document_info = get_document_status(doc_id)
+    document_info = database.get_document_status(doc_id)
 
     if document_info is None:
+        logger.warning("Document not found", doc_id=doc_id)
         return {"error": "Document not found", "doc_id": doc_id}
 
     return {
@@ -214,6 +262,13 @@ async def query_document_endpoint(doc_id: str, question: str, explain: bool = Fa
         logger.warning("Document not found for query", doc_id=doc_id, question=question)
         return {"error": "Document not found", "doc_id": doc_id}
 
+    # Use the RAG pipeline to generate a response
+    try:
+        from app.rag.pipeline import generate_response_with_rag
+        answer = generate_response_with_rag(doc_id, question)
+    except Exception as e:
+        logger.error("Error generating RAG response", doc_id=doc_id, question=question, error=str(e))
+        return {"error": f"Error generating response: {str(e)}", "doc_id": doc_id}
     # Use the RAG pipeline to generate a response and log to MLflow
     with mlflow.start_run(run_name=f"document_query_{doc_id}"):
         mlflow.log_param("document_id", doc_id)

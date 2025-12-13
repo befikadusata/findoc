@@ -72,8 +72,8 @@ def handle_task_failure(request, exc, traceback, doc_id, filepath):
         traceback=traceback,
         filepath=filepath
     )
-    from app.database import update_document_status
-    update_document_status(doc_id, 'failed')
+    from app.database_factory import database
+    database.update_document_status(doc_id, 'failed')
     DEAD_LETTER_TOTAL.inc()
     DOCUMENT_PROCESSING_TOTAL.labels(status='failed').inc()
     DOCUMENT_PROCESSING_CURRENT.dec()
@@ -84,6 +84,16 @@ def task_extract_text(self, doc_id: str, filepath: str) -> Dict[str, Any]:
     """Task 1: Extracts text from the document."""
     logger = get_logger("worker.task_extract_text").bind(doc_id=doc_id)
     logger.info("Starting OCR and text extraction")
+    from app.database_factory import database
+    database.update_document_status(doc_id, 'processing_ocr')
+
+    extracted_text = extract_text(filepath)
+    if not extracted_text.strip():
+        raise ValueError("No text could be extracted from the document")
+
+    logger.info("Text extraction successful", text_length=len(extracted_text))
+    database.update_document_status(doc_id, 'extracted')
+    return {'text': extracted_text, 'doc_id': doc_id, 'filepath': filepath}
     from app.database import update_document_status
     update_document_status(doc_id, 'processing_ocr')
 
@@ -109,9 +119,31 @@ def task_classify_document(self, data: Dict[str, Any]) -> Dict[str, Any]:
     doc_id, text = data['doc_id'], data['text']
     logger = get_logger("worker.task_classify_document").bind(doc_id=doc_id)
     logger.info("Starting document classification")
-    from app.database import update_document_status
-    update_document_status(doc_id, 'processing_classification')
+    from app.database_factory import database
+    database.update_document_status(doc_id, 'processing_classification')
 
+    results = classify_document(text, top_k=1)
+    doc_type = results[0]['doc_type'] if results else 'unknown'
+
+    logger.info("Document classified", doc_type=doc_type)
+    database.update_document_status(doc_id, f'classified_as_{doc_type}')
+    data['doc_type'] = doc_type
+    return data
+
+@celery_app.task(bind=True, name='app.worker.task_run_nlp_and_rag')
+def task_run_nlp_and_rag(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    """Task 3: Orchestrates parallel NLP and RAG tasks."""
+    doc_id, doc_type, text, filepath = data['doc_id'], data['doc_type'], data['text'], data['filepath']
+    logger = get_logger("worker.task_run_nlp_and_rag").bind(doc_id=doc_id)
+    logger.info("Starting parallel NLP and RAG processing.")
+
+    parallel_tasks = group(
+        task_index_document.s(text, doc_type, doc_id, filepath),
+        task_extract_entities.s(text, doc_type, doc_id),
+        task_generate_summary.s(text, doc_type, doc_id)
+    )
+    parallel_tasks.apply_async()
+    return data
     # Start MLflow run for this task
     with mlflow.start_run(run_name=f"document_classification_{doc_id}"):
         results = classify_document(text, top_k=1, include_explanation=True)
@@ -131,6 +163,76 @@ def task_classify_document(self, data: Dict[str, Any]) -> Dict[str, Any]:
             mlflow.log_param("top_influential_tokens", ", ".join(top_tokens))
             mlflow.log_metric("avg_attention", explanation.get('average_attention', 0.0))
 
+@celery_app.task(autoretry_for=(Exception,), max_retries=3, retry_backoff=True, name='app.worker.task_extract_entities')
+def task_extract_entities(text: str, doc_type: str, doc_id: str) -> bool:
+    """Sub-task: Extracts entities from text."""
+    logger = get_logger("worker.task_extract_entities").bind(doc_id=doc_id)
+    logger.info("Starting entity extraction")
+    from app.database_factory import database
+    entities = extract_entities(text, doc_type)
+    if 'error' in entities:
+        logger.error("Entity extraction failed", error=entities['error'])
+        return False
+    return database.update_document_entities(doc_id, entities)
+
+@celery_app.task(autoretry_for=(Exception,), max_retries=3, retry_backoff=True, name='app.worker.task_generate_summary')
+def task_generate_summary(text: str, doc_type: str, doc_id: str) -> bool:
+    """Sub-task: Generates a summary of the text."""
+    logger = get_logger("worker.task_generate_summary").bind(doc_id=doc_id)
+    logger.info("Starting summary generation")
+    from app.database_factory import database
+    summary = generate_summary(text, doc_type)
+    if 'error' in summary:
+        logger.error("Summary generation failed", error=summary['error'])
+        return False
+    return database.update_document_summary(doc_id, summary)
+
+@celery_app.task(bind=True, name='app.worker.task_finalize_processing')
+def task_finalize_processing(self, data: Dict[str, Any], start_time_str: str):
+    """Final Task: Marks processing as complete and records metrics."""
+    doc_id = data['doc_id']
+    logger = get_logger("worker.task_finalize_processing").bind(doc_id=doc_id)
+
+    # Check results of parallel tasks if needed (omitted for simplicity)
+
+    from app.database_factory import database
+    database.update_document_status(doc_id, 'completed')
+    logger.info("Document processing completed successfully.")
+
+    start_time = datetime.fromisoformat(start_time_str)
+    duration = (datetime.now() - start_time).total_seconds()
+    DOCUMENT_PROCESSING_DURATION.observe(duration)
+    DOCUMENT_PROCESSING_CURRENT.dec()
+    DOCUMENT_PROCESSING_TOTAL.labels(status='completed').inc()
+
+# --- Main Orchestrator Task ---
+@celery_app.task(bind=True, name='process_document')
+def process_document(self, doc_id: str, filepath: str):
+    """
+    Orchestrates the document processing pipeline as a chain of tasks.
+    """
+    task_logger = get_logger("worker.process_document").bind(doc_id=doc_id)
+    task_logger.info("Initializing document processing pipeline.")
+
+    from app.database_factory import database
+    database.update_document_status(doc_id, 'queued')
+
+    DOCUMENT_PROCESSING_CURRENT.inc()
+    start_time_iso = datetime.now().isoformat()
+
+    # Define the workflow as a chain of tasks
+    workflow = chain(
+        task_extract_text.s(doc_id=doc_id, filepath=filepath),
+        task_classify_document.s(),
+        task_run_nlp_and_rag.s(),
+        task_finalize_processing.s(start_time_str=start_time_iso)
+    )
+
+    # Define error handling for the entire chain
+    workflow.link_error(handle_task_failure.s(doc_id=doc_id, filepath=filepath))
+
+    # Execute the workflow
+    workflow.apply_async()
         mlflow.log_artifact("app/classification/model.py", "model_source")  # Log model source
 
         logger.info("Document classified", doc_type=doc_type)

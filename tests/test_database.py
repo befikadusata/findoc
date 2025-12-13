@@ -5,12 +5,8 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from unittest.mock import patch, MagicMock
 import pytest
-from app.database import (
-    init_db, create_document_record, update_document_status,
-    get_document_status, get_all_documents, update_document_summary,
-    get_document_summary, update_document_entities, get_document_entities,
-    DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
-)
+from app.database_factory import database
+from app.config import settings
 
 
 def get_test_db_connection():
@@ -32,7 +28,7 @@ def get_test_db_connection():
 def setup_test_database():
     """Initialize the database and clean it before tests."""
     # Initialize the database
-    init_db()
+    database.init_db()
 
     # Clear any existing data from the documents table
     conn = get_test_db_connection()
@@ -45,7 +41,7 @@ def setup_test_database():
 def test_init_db():
     """Test database initialization."""
     # Initialize the database
-    init_db()
+    database.init_db()
 
     # Establish a connection to verify the database and table exist
     conn = get_test_db_connection()
@@ -86,7 +82,7 @@ def test_create_document_record():
     doc_id = "test-doc-123"
     filename = "test_document.pdf"
 
-    success = create_document_record(doc_id, filename)
+    success = database.create_document_record(doc_id, filename)
     assert success is True
 
     # Verify the record exists in the database
@@ -109,11 +105,11 @@ def test_update_document_status():
     # Create a document record first
     doc_id = "test-doc-456"
     filename = "test_document2.pdf"
-    create_document_record(doc_id, filename)
+    database.create_document_record(doc_id, filename)
 
     # Test updating the document status
     new_status = "processing"
-    success = update_document_status(doc_id, new_status)
+    success = database.update_document_status(doc_id, new_status)
     assert success is True
 
     # Verify the status was updated in the database
@@ -134,11 +130,11 @@ def test_get_document_status():
     # Create a document record first
     doc_id = "test-doc-789"
     filename = "test_document3.pdf"
-    create_document_record(doc_id, filename)
-    update_document_status(doc_id, "processed")
+    database.create_document_record(doc_id, filename)
+    database.update_document_status(doc_id, "processed")
 
     # Test getting the document status
-    status_info = get_document_status(doc_id)
+    status_info = database.get_document_status(doc_id)
     assert status_info is not None
     assert status_info['doc_id'] == doc_id
     assert status_info['filename'] == filename
@@ -164,11 +160,11 @@ def test_get_all_documents():
     ]
 
     for doc_id, filename in docs_data:
-        create_document_record(doc_id, filename)
-        update_document_status(doc_id, "processed")
+        database.create_document_record(doc_id, filename)
+        database.update_document_status(doc_id, "processed")
 
     # Test getting all documents
-    all_docs = get_all_documents()
+    all_docs = database.get_all_documents()
     assert len(all_docs) == 3
 
     # Verify the documents are in the returned list
@@ -192,7 +188,7 @@ def test_update_document_summary():
         "key_points": ["Point 1", "Point 2"]
     }
 
-    success = update_document_summary(doc_id, summary_data)
+    success = database.update_document_summary(doc_id, summary_data)
     assert success is True
 
     # Verify the summary was updated in the database
@@ -222,10 +218,10 @@ def test_get_document_summary():
         "summary": "This is a test summary for retrieval",
         "key_points": ["Retrieved Point 1", "Retrieved Point 2"]
     }
-    update_document_summary(doc_id, summary_data)
+    database.update_document_summary(doc_id, summary_data)
 
     # Test retrieving the document summary
-    retrieved_summary = get_document_summary(doc_id)
+    retrieved_summary = database.get_document_summary(doc_id)
     assert retrieved_summary == summary_data
 
 
@@ -236,7 +232,7 @@ def test_update_document_entities():
     # Create a document record first
     doc_id = "test-doc-entities"
     filename = "entities_test.pdf"
-    create_document_record(doc_id, filename)
+    database.create_document_record(doc_id, filename)
 
     # Test updating the document entities
     entities_data = {
@@ -245,7 +241,7 @@ def test_update_document_entities():
         "customer_name": "John Doe"
     }
 
-    success = update_document_entities(doc_id, entities_data)
+    success = database.update_document_entities(doc_id, entities_data)
     assert success is True
 
     # Verify the entities were updated in the database
@@ -276,10 +272,10 @@ def test_get_document_entities():
         "total_amount": 200.75,
         "customer_name": "Jane Smith"
     }
-    update_document_entities(doc_id, entities_data)
+    database.update_document_entities(doc_id, entities_data)
 
     # Test retrieving the document entities
-    retrieved_entities = get_document_entities(doc_id)
+    retrieved_entities = database.get_document_entities(doc_id)
     assert retrieved_entities == entities_data
 
 
@@ -288,26 +284,26 @@ def test_database_error_handling():
     # Mock psycopg2.connect to simulate connection errors
     with patch('psycopg2.connect', side_effect=psycopg2.Error("Connection failed")):
         # Test that functions return appropriate values when database errors occur
-        result = create_document_record("doc-id", "filename.pdf")
+        result = database.create_document_record("doc-id", "filename.pdf")
         assert result is False
 
-        result = update_document_status("doc-id", "status")
+        result = database.update_document_status("doc-id", "status")
         assert result is False
 
-        result = get_document_status("doc-id")
+        result = database.get_document_status("doc-id")
         assert result is None
 
-        result = get_all_documents()
+        result = database.get_all_documents()
         assert result == []
 
-        result = update_document_summary("doc-id", {"summary": "test"})
+        result = database.update_document_summary("doc-id", {"summary": "test"})
         assert result is False
 
-        result = get_document_summary("doc-id")
+        result = database.get_document_summary("doc-id")
         assert result is None
 
-        result = update_document_entities("doc-id", {"entity": "test"})
+        result = database.update_document_entities("doc-id", {"entity": "test"})
         assert result is False
 
-        result = get_document_entities("doc-id")
+        result = database.get_document_entities("doc-id")
         assert result is None
