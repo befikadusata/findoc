@@ -24,6 +24,63 @@ services:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
 
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: findocai-mlflow
+    ports:
+      - "5000:5000"
+    environment:
+      - MLFLOW_BACKEND_STORE_URI=sqlite:///mlflow.db
+      - MLFLOW_DEFAULT_ARTIFACT_ROOT=./mlartifacts
+    volumes:
+      - mlflow_data:/mlflow_data
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow.db --default-artifact-root ./mlartifacts
+    restart: unless-stopped
+
+  findocai-api:
+    build: .
+    container_name: findocai-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_HOST=findocai-postgres
+      - DB_PORT=5432
+      - DB_NAME=findocai
+      - DB_USER=findocai_user
+      - DB_PASSWORD=findocai_password
+      - REDIS_HOST=findocai-redis
+      - REDIS_PORT=6379
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    volumes:
+      - ./data/uploads:/app/data/uploads
+    depends_on:
+      - postgres
+      - redis
+      - mlflow
+    restart: unless-stopped
+
+  findocai-worker:
+    build: .
+    container_name: findocai-worker
+    command: celery -A app.worker worker --loglevel=info
+    environment:
+      - DB_HOST=findocai-postgres
+      - DB_PORT=5432
+      - DB_NAME=findocai
+      - DB_USER=findocai_user
+      - DB_PASSWORD=findocai_password
+      - REDIS_HOST=findocai-redis
+      - REDIS_PORT=6379
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    depends_on:
+      - postgres
+      - redis
+      - mlflow
+    restart: unless-stopped
+
 volumes:
   redis_data:
   postgres_data:
+  mlflow_data:
