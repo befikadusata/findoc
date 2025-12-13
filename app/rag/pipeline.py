@@ -205,7 +205,7 @@ class RAGPipeline:
             n_results (int): Number of results to return
 
         Returns:
-            List[Dict]: List of matching chunks with metadata
+            List[Dict]: List of matching chunks with metadata and confidence scores
         """
         logger = get_logger(__name__).bind(doc_id=doc_id, query=query)
 
@@ -234,13 +234,20 @@ class RAGPipeline:
                 n_results=n_results
             )
 
-            # Format the results
+            # Format the results with confidence scores based on similarity
             formatted_results = []
             for i in range(len(results['documents'][0])):
+                # Convert distance to similarity score (lower distance = higher similarity)
+                distance = results['distances'][0][i]
+                similarity_score = 1 / (1 + distance)  # Convert distance to similarity (0 to 1 range)
+
                 formatted_results.append({
                     'document': results['documents'][0][i],
                     'metadata': results['metadatas'][0][i],
-                    'distance': results['distances'][0][i]
+                    'distance': distance,
+                    'similarity_score': similarity_score,  # Higher is better
+                    'rank': i + 1,  # Ranking position
+                    'source_chunk_id': results['ids'][0][i]  # Add source chunk ID for attribution
                 })
 
             return formatted_results
@@ -253,7 +260,8 @@ class RAGPipeline:
                                   doc_id: str,
                                   query: str,
                                   n_results: int = 3,
-                                  use_llm: bool = True) -> str:
+                                  use_llm: bool = True,
+                                  include_explanation: bool = False) -> Dict:
         """
         Generate response to a query using RAG (Retrieval-Augmented Generation).
 
@@ -262,15 +270,29 @@ class RAGPipeline:
             query (str): Question/query to answer
             n_results (int): Number of relevant chunks to retrieve
             use_llm (bool): Whether to use LLM to generate response
+            include_explanation (bool): Whether to include source attribution and confidence scores
 
         Returns:
-            str: Generated response with retrieved context
+            Dict: Generated response with retrieved context and explanation data if requested
         """
         # Query the document to get relevant chunks
         results = self.query_document(doc_id, query, n_results)
 
         if not results:
-            return "No relevant information found in the document."
+            response = "No relevant information found in the document."
+            if include_explanation:
+                return {
+                    "response": response,
+                    "query": query,
+                    "doc_id": doc_id,
+                    "retrieved_chunks": [],
+                    "explanation": {
+                        "status": "no_relevant_content",
+                        "confidence": 0.0
+                    }
+                }
+            else:
+                return response
 
         # Combine the retrieved chunks to form context
         context_parts = []
@@ -283,10 +305,23 @@ class RAGPipeline:
             # Use the Gemini API to generate a response based on the context
             try:
                 import google.generativeai as genai
-                
+
                 # Get the API key from centralized settings
                 if settings.gemini_api_key is None:
-                    return f"Based on the document:\n\n{context}"
+                    response = f"Based on the document:\n\n{context}"
+                    if include_explanation:
+                        return {
+                            "response": response,
+                            "query": query,
+                            "doc_id": doc_id,
+                            "retrieved_chunks": results,
+                            "explanation": {
+                                "status": "api_key_unavailable",
+                                "confidence": 0.0
+                            }
+                        }
+                    else:
+                        return response
 
                 # Configure the API key
                 genai.configure(api_key=settings.gemini_api_key.get_secret_value())
@@ -320,19 +355,99 @@ class RAGPipeline:
 
                 # Return the text part of the response
                 if response.text:
-                    return response.text.strip()
+                    response_text = response.text.strip()
                 else:
                     # If there's an issue with the response, return the context
-                    return f"Based on the document:\n\n{context}"
+                    response_text = f"Based on the document:\n\n{context}"
+
+                if include_explanation:
+                    # Calculate overall confidence based on average similarity scores of retrieved chunks
+                    avg_similarity = sum([result['similarity_score'] for result in results]) / len(results) if results else 0.0
+
+                    return {
+                        "response": response_text,
+                        "query": query,
+                        "doc_id": doc_id,
+                        "retrieved_chunks": results,
+                        "explanation": {
+                            "method": "rag_with_llm",
+                            "confidence": avg_similarity,
+                            "source_attribution": [
+                                {
+                                    "chunk_id": result['source_chunk_id'],
+                                    "similarity_score": result['similarity_score'],
+                                    "rank": result['rank'],
+                                    "content_preview": result['document'][:100] + "..." if len(result['document']) > 100 else result['document']
+                                }
+                                for result in results
+                            ]
+                        }
+                    }
+                else:
+                    return response_text
 
             except Exception as e:
                 logger = get_logger(__name__)
                 logger.error("Error using Gemini API", error=str(e))
+
+                # Calculate overall confidence based on average similarity scores of retrieved chunks
+                avg_similarity = sum([result['similarity_score'] for result in results]) / len(results) if results else 0.0
+
                 # Fallback to returning the context if there's an error
-                return f"Based on the document:\n\n{context}"
+                response_text = f"Based on the document:\n\n{context}"
+
+                if include_explanation:
+                    return {
+                        "response": response_text,
+                        "query": query,
+                        "doc_id": doc_id,
+                        "retrieved_chunks": results,
+                        "explanation": {
+                            "method": "rag_fallback",
+                            "confidence": avg_similarity,
+                            "error": str(e),
+                            "source_attribution": [
+                                {
+                                    "chunk_id": result['source_chunk_id'],
+                                    "similarity_score": result['similarity_score'],
+                                    "rank": result['rank'],
+                                    "content_preview": result['document'][:100] + "..." if len(result['document']) > 100 else result['document']
+                                }
+                                for result in results
+                            ]
+                        }
+                    }
+                else:
+                    return response_text
         else:
+            # Calculate overall confidence based on average similarity scores of retrieved chunks
+            avg_similarity = sum([result['similarity_score'] for result in results]) / len(results) if results else 0.0
+
             # For backward compatibility, return the context as before
-            return f"Based on the document:\n\n{context}"
+            response_text = f"Based on the document:\n\n{context}"
+
+            if include_explanation:
+                return {
+                    "response": response_text,
+                    "query": query,
+                    "doc_id": doc_id,
+                    "retrieved_chunks": results,
+                    "explanation": {
+                        "method": "rag_no_llm",
+                        "confidence": avg_similarity,
+                        "source_attribution": [
+                            {
+                                "chunk_id": result['source_chunk_id'],
+                                "similarity_score": result['similarity_score'],
+                                "rank": result['rank'],
+                                "content_preview": result['document'][:100] + "..." if len(result['document']) > 100 else result['document']
+                            }
+                            for result in results
+                        ]
+                    }
+                }
+            else:
+                return response_text
 
 
 # Global RAG pipeline instance for convenience
@@ -371,7 +486,7 @@ def query_document(doc_id: str, query: str, n_results: int = 5) -> List[Dict]:
     return rag_pipeline.query_document(doc_id, query, n_results)
 
 
-def generate_response_with_rag(doc_id: str, query: str, n_results: int = 3) -> str:
+def generate_response_with_rag(doc_id: str, query: str, n_results: int = 3, include_explanation: bool = False) -> str:
     """
     Convenience function to generate a response using RAG.
 
@@ -379,11 +494,21 @@ def generate_response_with_rag(doc_id: str, query: str, n_results: int = 3) -> s
         doc_id (str): ID of the document to query
         query (str): Question/query to answer
         n_results (int): Number of relevant chunks to retrieve
+        include_explanation (bool): Whether to include explanation data
 
     Returns:
-        str: Generated response with retrieved context
+        str or Dict: Generated response with retrieved context, or dict with explanation if include_explanation=True
     """
-    return rag_pipeline.generate_response_with_rag(doc_id, query, n_results, use_llm=True)
+    result = rag_pipeline.generate_response_with_rag(doc_id, query, n_results, use_llm=True, include_explanation=include_explanation)
+
+    # For backward compatibility, return just the response string when explanations are not requested
+    if include_explanation:
+        return result
+    else:
+        if isinstance(result, dict):
+            return result.get('response', 'No response generated')
+        else:
+            return result
 
 
 def delete_document_from_chromadb(doc_id: str) -> bool:

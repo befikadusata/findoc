@@ -6,8 +6,8 @@ The implementation uses a HuggingFace pipeline with a DistilBERT model fine-tune
 """
 
 import os
-from typing import Optional, List
-from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+from typing import Optional, List, Dict, Tuple
+from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification, DistilBertTokenizer, DistilBertModel
 import torch
 
 # Import structured logging
@@ -16,7 +16,7 @@ from app.utils.logging_config import get_logger
 
 class DocumentClassifier:
     """
-    Document classifier using a pre-trained transformer model.
+    Document classifier using a pre-trained transformer model with attention-based explanations.
     """
 
     def __init__(self, model_name: str = "distilbert-base-uncased",
@@ -37,8 +37,12 @@ class DocumentClassifier:
 
         self.logger.info("Initializing document classifier", model_name=self.model_name, num_labels=self.num_labels)
 
-        # Initialize the classification pipeline
+        # Initialize tokenizer and model for explainability
         try:
+            self.tokenizer = DistilBertTokenizer.from_pretrained(self.model_path)
+            self.model = DistilBertModel.from_pretrained(self.model_path)
+
+            # Initialize the classification pipeline for fallback
             self.classifier = pipeline(
                 "text-classification",
                 model=self.model_path,
@@ -50,18 +54,21 @@ class DocumentClassifier:
         except Exception as e:
             self.logger.error("Error initializing classifier", error=str(e))
             # Fallback to a simple keyword-based classifier for demo purposes
+            self.tokenizer = None
+            self.model = None
             self.classifier = None
 
-    def classify_document(self, text: str, top_k: int = 1) -> List[dict]:
+    def classify_document(self, text: str, top_k: int = 1, include_explanation: bool = False) -> List[dict]:
         """
-        Classify a document based on its text content.
+        Classify a document based on its text content with optional attention-based explanations.
 
         Args:
             text (str): The text content of the document to classify
             top_k (int): Number of top predictions to return
+            include_explanation (bool): Whether to include attention-based explanations
 
         Returns:
-            List[dict]: List of classification results with labels and confidence scores
+            List[dict]: List of classification results with labels, confidence scores, and explanations
         """
         self.logger.info("Starting document classification", text_length=len(text), top_k=top_k)
 
@@ -97,10 +104,14 @@ class DocumentClassifier:
                 'LABEL_5': 'other'
             }
 
-            # Apply label mapping
+            # Apply label mapping and add explanations if requested
             for result in top_results:
                 original_label = result['label']
                 result['doc_type'] = label_mapping.get(original_label, original_label)
+
+                # Add attention-based explanation if requested
+                if include_explanation and self.tokenizer and self.model:
+                    result['explanation'] = self._get_attention_explanation(text, result['label'])
 
             self.logger.info("Classification completed", results_count=len(top_results))
             return top_results
@@ -109,6 +120,110 @@ class DocumentClassifier:
             self.logger.error("Error during classification", error=str(e))
             # Fallback to keyword-based classification
             return self._keyword_based_classification(text, top_k)
+
+    def _get_attention_explanation(self, text: str, predicted_label: str) -> Dict:
+        """
+        Generate attention-based explanations for the classification result.
+
+        Args:
+            text (str): Input text
+            predicted_label (str): Predicted label for the text
+
+        Returns:
+            Dict: Explanation including most influential tokens
+        """
+        import torch
+        import numpy as np
+
+        try:
+            # Tokenize the text
+            inputs = self.tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=512)
+            input_ids = inputs['input_ids']
+            attention_mask = inputs['attention_mask']
+
+            # Get model outputs with attention
+            with torch.no_grad():
+                outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, output_attentions=True)
+                attentions = outputs.attentions  # Tuple of attention tensors for each layer
+
+            # Calculate attention weights for each token
+            # Get the attention from the last layer's first head (common approach)
+            last_layer_attention = attentions[-1]  # Shape: [batch_size, num_heads, seq_len, seq_len]
+            attention_weights = last_layer_attention[0, 0, 0, :].cpu().numpy()  # Average attention for first token (CLS)
+
+            # Get tokens corresponding to the attention weights
+            tokens = self.tokenizer.convert_ids_to_tokens(input_ids[0])
+
+            # Create a list of (token, attention_weight) pairs
+            token_attention_pairs = [(token, float(attention_weights[i])) for i, token in enumerate(tokens) if token not in ['[CLS]', '[SEP]', '[PAD]']]
+
+            # Sort by attention weight to find most influential tokens
+            token_attention_pairs = sorted(token_attention_pairs, key=lambda x: x[1], reverse=True)
+
+            # Return the top 10 most influential tokens
+            top_tokens = token_attention_pairs[:10]
+
+            # Calculate some statistics
+            avg_attention = float(np.mean([weight for _, weight in top_tokens]))
+            max_attention = float(max([weight for _, weight in top_tokens]))
+
+            return {
+                'predicted_label': predicted_label,
+                'top_influential_tokens': [{'token': token, 'attention_weight': weight} for token, weight in top_tokens],
+                'average_attention': avg_attention,
+                'max_attention': max_attention,
+                'explanation_method': 'attention_weights'
+            }
+        except Exception as e:
+            self.logger.error("Error generating attention explanation", error=str(e))
+            return {
+                'predicted_label': predicted_label,
+                'error': f'Could not generate explanation: {str(e)}',
+                'explanation_method': 'attention_weights'
+            }
+
+    def generate_attention_visualization(self, text: str, predicted_label: str) -> Optional[Dict]:
+        """
+        Generate visualization for attention weights in the classification.
+
+        Args:
+            text (str): Input text
+            predicted_label (str): Predicted label for the text
+
+        Returns:
+            Optional[Dict]: Visualization data or None if generation fails
+        """
+        try:
+            # Get attention explanation
+            explanation = self._get_attention_explanation(text, predicted_label)
+
+            # Import visualization module
+            from app.utils.attention_visualization import visualize_attention_weights, visualize_token_attention_inline, create_attention_summary
+
+            # Create visualizations
+            top_tokens = explanation.get('top_influential_tokens', [])
+
+            if not top_tokens:
+                return None
+
+            # Generate visualization image
+            image_url = visualize_attention_weights(top_tokens, f"Attention Weights for '{predicted_label}' Classification")
+
+            # Create inline visualization
+            inline_html = visualize_token_attention_inline(top_tokens)
+
+            # Create summary
+            summary = create_attention_summary(top_tokens)
+
+            return {
+                'image_url': image_url,
+                'inline_html': inline_html,
+                'summary': summary,
+                'explanation_method': 'attention_weights_visualization'
+            }
+        except Exception as e:
+            self.logger.error("Error generating attention visualization", error=str(e))
+            return None
 
     def _keyword_based_classification(self, text: str, top_k: int = 1) -> List[dict]:
         """

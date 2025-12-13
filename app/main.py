@@ -27,6 +27,10 @@ logger = get_logger(__name__)
 # Import centralized settings
 from app.config import settings
 
+# Import MLflow
+import mlflow
+mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
+
 # Create a Celery instance for calling tasks
 celery_app = Celery('findocai', broker=settings.redis_url)
 
@@ -129,15 +133,74 @@ async def upload_document(file: UploadFile = File(...), current_user: dict = aut
             "doc_id": doc_id,
             "filename": file.filename,
             "error": f"Upload processing error: {str(e)}"
+    try:
+        upload_logger.info("Starting document upload")
+
+        # Log the upload to MLflow
+        with mlflow.start_run(run_name=f"document_upload_{doc_id}"):
+            mlflow.log_param("document_id", doc_id)
+            mlflow.log_param("filename", file.filename)
+            mlflow.log_param("content_type", file.content_type)
+
+            # Create the uploads directory if it doesn't exist
+            upload_dir = "./data/uploads"
+            os.makedirs(upload_dir, exist_ok=True)
+
+            # Create the file path with the unique document ID
+            file_path = os.path.join(upload_dir, f"{doc_id}_{file.filename}")
+
+            # Read file content
+            file_content = await file.read()
+            mlflow.log_param("file_size", len(file_content))
+
+            # Save the uploaded file
+            with open(file_path, "wb") as buffer:
+                buffer.write(file_content)
+
+            # Log the file as an artifact
+            mlflow.log_artifact(file_path, "uploaded_files")
+
+            # Create a record in the database with 'uploaded' status
+            if not database.create_document_record(doc_id, file.filename):
+                upload_logger.error("Failed to create document record in database")
+                return {
+                    "doc_id": doc_id,
+                    "filename": file.filename,
+                    "error": "Failed to register document in system"
+                }
+
+            # Update the document status to 'queued' before starting processing
+            if not database.update_document_status(doc_id, 'queued'):
+                upload_logger.error("Failed to update document status in database")
+                return {
+                    "doc_id": doc_id,
+                    "filename": file.filename,
+                    "error": "Failed to update document status"
+                }
+
+            upload_logger.info("Document saved, status updated, and MLflow artifact logged")
+
+            # Trigger the document processing task asynchronously
+            # This will be executed by a Celery worker
+            task = celery_app.send_task('process_document', args=[doc_id, file_path])
+
+        upload_logger.info("Processing task queued", task_id=task.id)
+
+        return {
+            "doc_id": doc_id,
+            "filename": file.filename,
+            "file_path": file_path,
+            "task_id": task.id,
+            "message": "Document uploaded successfully and processing started"
         }
 
-    return {
-        "doc_id": doc_id,
-        "filename": file.filename,
-        "file_path": file_path,
-        "task_id": task.id,
-        "message": "Document uploaded successfully and processing started"
-    }
+    except Exception as e:
+        upload_logger.error("Error during document upload processing", error=str(e))
+        return {
+            "doc_id": doc_id,
+            "filename": file.filename,
+            "error": f"Upload processing error: {str(e)}"
+        }
 
 @app.get("/status/{doc_id}")
 async def get_document_status_endpoint(doc_id: str, current_user: dict = auth_dependency) -> Dict[str, Any]:
@@ -173,17 +236,18 @@ async def get_document_status_endpoint(doc_id: str, current_user: dict = auth_de
     }
 
 @app.get("/query")
-async def query_document_endpoint(doc_id: str, question: str, current_user: dict = auth_dependency) -> Dict[str, Any]:
+async def query_document_endpoint(doc_id: str, question: str, explain: bool = False, current_user: dict = auth_dependency) -> Dict[str, Any]:
     """
     Query a document and get an answer based on its content.
 
     Args:
         doc_id: The unique identifier of the document to query
         question: The question to ask about the document
+        explain: Whether to include explanation data (confidence scores, source attribution)
         current_user: Authenticated user (if authentication is enabled)
 
     Returns:
-        Dict[str, Any]: The answer to the question or error
+        Dict[str, Any]: The answer to the question or error, with optional explanation data
     """
     # Validate input parameters
     try:
@@ -205,12 +269,42 @@ async def query_document_endpoint(doc_id: str, question: str, current_user: dict
     except Exception as e:
         logger.error("Error generating RAG response", doc_id=doc_id, question=question, error=str(e))
         return {"error": f"Error generating response: {str(e)}", "doc_id": doc_id}
+    # Use the RAG pipeline to generate a response and log to MLflow
+    with mlflow.start_run(run_name=f"document_query_{doc_id}"):
+        mlflow.log_param("document_id", doc_id)
+        mlflow.log_param("question", question)
+        mlflow.log_param("query_timestamp", int(time.time()))
+        mlflow.log_param("include_explanation", explain)
 
-    return {
-        "doc_id": doc_id,
-        "question": question,
-        "answer": answer
-    }
+        from app.rag.pipeline import generate_response_with_rag
+        result = generate_response_with_rag(doc_id, question, include_explanation=explain)
+
+        # Log metrics based on result format
+        if explain and isinstance(result, dict):
+            answer = result.get("response", "")
+            mlflow.log_metric("answer_length", len(answer) if answer else 0)
+            mlflow.log_metric("confidence_score", result.get("explanation", {}).get("confidence", 0.0))
+        else:
+            answer_text = result if isinstance(result, str) else result.get("response", "")
+            mlflow.log_metric("answer_length", len(answer_text) if answer_text else 0)
+
+    if explain and isinstance(result, dict):
+        # Return the full result with explanations
+        return {
+            "doc_id": doc_id,
+            "question": question,
+            "answer": result.get("response", ""),
+            "explanation": result.get("explanation", {}),
+            "retrieved_chunks": result.get("retrieved_chunks", [])
+        }
+    else:
+        # Return just the answer for backward compatibility
+        answer_text = result if isinstance(result, str) else result.get("response", "")
+        return {
+            "doc_id": doc_id,
+            "question": question,
+            "answer": answer_text
+        }
 
 @app.get("/summary/{doc_id}")
 async def get_document_summary_endpoint(doc_id: str, current_user: dict = auth_dependency) -> Dict[str, Any]:
@@ -248,6 +342,54 @@ async def get_document_summary_endpoint(doc_id: str, current_user: dict = auth_d
     return {
         "doc_id": doc_id,
         "summary": summary
+    }
+
+
+@app.get("/explain/classification/{doc_id}")
+async def get_classification_explanation(doc_id: str) -> Dict[str, Any]:
+    """
+    Get the classification explanation for a document if available.
+
+    Args:
+        doc_id: The unique identifier of the document to get explanation for
+
+    Returns:
+        Dict[str, Any]: Classification explanation or error
+    """
+    # Validate doc_id format
+    try:
+        DocumentIdRequest(doc_id=doc_id)
+    except Exception:
+        return {"error": "Invalid document ID format", "doc_id": doc_id}
+
+    # Verify that the document exists in our system
+    document_info = get_document_status(doc_id)
+
+    if document_info is None:
+        return {"error": "Document not found", "doc_id": doc_id}
+
+    # Retrieve document entities which may contain classification explanation
+    from app.database import get_document_entities
+    entities = get_document_entities(doc_id)
+
+    # We need to extract classification explanation from the document processing information
+    # For now, we'll provide a way to classify fresh with explanation
+    from app.classification.model import classifier
+
+    # Get the document text from storage (this would require reading the file back)
+    # Since we don't have a function to retrieve the original text, we'll return information
+    # about what we know about the classification if it's available in the document status
+    doc_type = document_info.get('status', '').replace('classified_as_', '') if 'classified_as_' in document_info.get('status', '') else 'unknown'
+
+    return {
+        "doc_id": doc_id,
+        "classification_info": {
+            "predicted_type": doc_type,
+            "status": document_info.get('status'),
+            "created_at": document_info.get('created_at'),
+            "updated_at": document_info.get('updated_at')
+        },
+        "message": "Classification explanation endpoint - implementation would require access to original text for attention visualization"
     }
 
 
