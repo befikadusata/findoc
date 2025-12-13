@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock, call
 import pytest
 import uuid
 from app.main import app, celery_app
-from app.database import init_db, get_document_status, get_document_summary, get_document_entities, get_db_connection
+from app.database_factory import database
 from app.config import settings
 import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
@@ -25,6 +25,7 @@ def override_test_settings():
         mock_settings.db_user = os.getenv("DB_USER", "findocai_user")
         mock_settings.db_password = MagicMock(get_secret_value=lambda: os.getenv("DB_PASSWORD", "findocai_password"))
         mock_settings.gemini_api_key = MagicMock(get_secret_value=lambda: "dummy_gemini_api_key")
+        mock_settings.require_auth = False  # Disable authentication for tests
         mock_settings.redis_url = f"redis://{mock_settings.redis_host}:{mock_settings.redis_port}/0"
         yield mock_settings
 
@@ -80,7 +81,7 @@ def clean_test_database(override_test_settings):
             mock_db_settings.db_name = test_db_name
             mock_db_settings.db_user = test_db_user
             mock_db_settings.db_password = MagicMock(get_secret_value=lambda: test_db_password)
-            init_db()
+            database.init_db()
 
     _drop_and_create_db(action="create") # Setup before test
     yield # Run the test
@@ -327,7 +328,7 @@ def test_upload_endpoint_database_integration(override_test_settings, clean_test
 
 
 
-            document_info = get_document_status(doc_id)
+            document_info = database.get_document_status(doc_id)
 
 
 
@@ -507,7 +508,7 @@ def test_full_processing_pipeline(mock_extract_text, mock_classify_document, moc
         # 3. Check the final status and processed data in the database
 
 
-        final_status = get_document_status(doc_id)
+        final_status = database.get_document_status(doc_id)
 
 
         assert final_status is not None
@@ -519,7 +520,7 @@ def test_full_processing_pipeline(mock_extract_text, mock_classify_document, moc
 
 
 
-        summary_data = get_document_summary(doc_id)
+        summary_data = database.get_document_summary(doc_id)
 
 
         assert summary_data is not None
@@ -534,7 +535,7 @@ def test_full_processing_pipeline(mock_extract_text, mock_classify_document, moc
 
 
 
-        entities_data = get_document_entities(doc_id)
+        entities_data = database.get_document_entities(doc_id)
 
 
         assert entities_data is not None

@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     # Redis Configuration
     redis_host: str = "localhost"
     redis_port: int = 6380
-    
+
     # Database Configuration (PostgreSQL)
     db_host: str = "localhost"
     db_port: int = 5434
@@ -19,6 +19,9 @@ class Settings(BaseSettings):
 
     # Gemini API Configuration
     gemini_api_key: Optional[SecretStr] = Field(None, env="GEMINI_API_KEY") # Optional for local development/testing
+
+    # Authentication Configuration
+    require_auth: bool = Field(default=True, env="REQUIRE_AUTH")  # Whether to require authentication
 
     # Celery Configuration
     # Constructed from redis_host and redis_port, or can be overridden

@@ -52,9 +52,9 @@ def test_database_deletion():
         mock_conn.return_value.cursor.return_value = mock_cursor
         mock_cursor.rowcount = 1  # Simulate one row deleted
         
-        from app.database import delete_document_record
+        from app.database_factory import database
         doc_id = str(uuid.uuid4())
-        result = delete_document_record(doc_id)
+        result = database.delete_document_record(doc_id)
         
         # Verify the SQL command was called correctly
         mock_cursor.execute.assert_called_once_with('DELETE FROM documents WHERE doc_id = %s', (doc_id,))

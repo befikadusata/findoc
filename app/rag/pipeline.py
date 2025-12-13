@@ -416,6 +416,20 @@ def delete_document_from_chromadb(doc_id: str) -> bool:
         return False
 
 
+def get_document_summary(doc_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get the summary of a document from the database.
+
+    Args:
+        doc_id (str): ID of the document to query
+
+    Returns:
+        Dict with document summary or None if not found
+    """
+    from app.database_factory import database
+    return database.get_document_summary(doc_id)
+
+
 if __name__ == "__main__":
     # Example usage
     logger = get_logger(__name__)
